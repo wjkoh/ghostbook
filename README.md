@@ -176,8 +176,8 @@ Caddy is not strictly required; Nginx, Traefik, HAProxy, or Cloudflare Tunnel wo
 3. **Install the release binary on the VM:**
 
 ```bash
-curl -fsSLO https://github.com/wjkoh/ghostbook/releases/download/v0.1.0/ghostbook-linux-amd64
-curl -fsSLO https://github.com/wjkoh/ghostbook/releases/download/v0.1.0/SHA256SUMS
+curl -fsSLO https://github.com/wjkoh/ghostbook/releases/latest/download/ghostbook-linux-amd64
+curl -fsSLO https://github.com/wjkoh/ghostbook/releases/latest/download/SHA256SUMS
 grep ghostbook-linux-amd64 SHA256SUMS | sha256sum -c -
 sudo install -m 0755 ghostbook-linux-amd64 /usr/local/bin/ghostbook
 ```
