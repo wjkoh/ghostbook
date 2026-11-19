@@ -1,8 +1,28 @@
 # Ghostbook
 
-Single-binary collaborative book studio where humans read cleanly on the web and only AI agents write.
+A single-binary collaborative book studio where a team maintains one living Single Source of Truth, humans read cleanly on the web, and only AI agents write.
 
-Ghostbook turns a Git-backed Markdown book into a live server-rendered publication with an embedded pure-Go SQLite FTS5 search index, immutable revision permalinks, raw Markdown HTTP twins, an RSS 2.0 timeline feed, and 13 authenticated MCP and ConnectRPC authoring tools. There is no web editor, no Node.js runtime, and no external CDN dependency.
+Every team member connects Ghostbook to the AI app they already use: the Claude app, ChatGPT app, Gemini, Antigravity, Cursor, or CLI coding agents. Their AI agents read and edit the same project book simultaneously over remote MCP and ConnectRPC, committing every change to Git under that teammate's name and email with optimistic revision locks. Because the book always holds the latest numbers, decisions, and architecture in one canonical corpus, any teammate can ask their agent to derive a one-pager, a full report, an executive memo, or a slide deck directly from the book in seconds.
+
+Under the hood, Ghostbook ships as a single static Go binary with embedded Git, pure-Go SQLite FTS5 search, immutable revision permalinks, raw Markdown HTTP twins, an RSS 2.0 timeline feed, and 13 authoring tools. There is no web editor, no Node.js runtime, and no external CDN dependency.
+
+## Before and After Ghostbook
+
+| Workflow | Before Ghostbook | After Ghostbook |
+| :--- | :--- | :--- |
+| **Multi-person AI collaboration** | Each teammate chats in an isolated Claude, ChatGPT, or Gemini thread and manually copy-pastes snippets into shared docs. | Every teammate connects their preferred AI app to the same Ghostbook URL. All agents read and patch the same living chapters simultaneously. |
+| **Deriving one-pagers, reports, and decks** | Someone spends hours reconciling five stale docs and Slack threads before drafting a memo or slide deck, and numbers drift immediately. | Any teammate asks their agent to read the live book and generate a one-pager, board report, or slide deck grounded in the latest revision. |
+| **Concurrent edits without overwrites** | Parallel edits clobber each other or create conflicting copies like Strategy_v7_FINAL_bob.docx. | Optimistic Git revision locks require exact patches against the latest SHA, so concurrent agents merge cleanly and never silently overwrite work. |
+| **Provenance and audit trail** | Nobody remembers who changed a pricing assumption, when a metric moved, or why a section disappeared. | Every agent edit writes a real Git commit attributed to the human co-author, with section-level Git blame, unified diffs, and immutable /rev/rN permalinks. |
+| **Reading vs. editing ergonomics** | Wiki tools and cloud docs mix clumsy WYSIWYG editors with cluttered toolbars, breaking math, diagrams, and print layouts. | Humans get a distraction-free serif book with KaTeX math, Mermaid diagrams, dark mode, RSS timeline updates, and US-Letter print output. |
+| **Cross-tool AI ingestion** | Sharing context with another AI tool means exporting PDFs or pasting massive text blobs that go stale immediately. | Every chapter, diagram, and historical revision has a live .md twin, plus /llms.txt and /llms-full.txt for instant ingestion by any AI fetcher. |
+
+## Real-World Use Cases
+
+- **Product and strategy launch books:** A founder using Claude, a product lead using ChatGPT, and an engineer using Antigravity or Cursor co-author one living strategy book covering market research, pricing, roadmap, and risks. Before a leadership review, any of them tells their agent to pull Chapters 1 through 4 and draft a 2-page executive brief or a 12-slide board deck that matches the book's exact numbers.
+- **Engineering architecture handbooks:** Backend, infrastructure, and security engineers connect their coding agents to one Ghostbook. When an engineer ships a schema or protocol change, their agent patches the relevant chapter, updates the Mermaid diagram, and leaves a TODO callout for another teammate to verify a benchmark.
+- **Investment memos and research bibles:** Analysts and partners continuously update diligence findings, competitor profiles, and meeting briefings through their AI assistants. On committee day, they export a print-ready US-Letter packet or generate a tailored LP one-pager directly from the latest revision.
+- **Cross-functional deal and onboarding playbooks:** Sales, legal, and operations teams keep one canonical playbook updated after every customer call, letting any teammate's AI agent answer questions via SQLite FTS5 search or draft customer-specific proposals without hunting through folders.
 
 ## Preview
 
@@ -23,14 +43,6 @@ The screenshots below were captured from a live 10-commit Ghostbook session auth
 ### Co-Author Remote MCP Setup Guide (Dark Mode)
 
 ![Ghostbook co-author setup guide with personalized remote MCP endpoint and Claude Code CLI snippet](docs/screenshots/04-mcp-guide.png)
-
-## Why Ghostbook
-
-When a small team co-authors a strategy book, technical specification, or institutional handbook with AI agents, copy-pasting between chat windows and shared docs breaks lineage immediately. Ghostbook enforces a clean division of labor:
-
-- **Humans read on the web:** Clean serif typography, dark mode, KaTeX math, Mermaid diagrams, US-Letter print layout, revision history, and per-line Git blame.
-- **Agents write over MCP and ConnectRPC:** Claude, ChatGPT, Gemini, Cursor, and CLI agents connect via a personalized per-author endpoint and edit chapters through exact patches under optimistic revision locks.
-- **Git is the single source of truth:** Every edit writes a real Git commit attributed to the co-author's display name and email, assigns a sequential revision number starting at r1, and optionally syncs with a remote Git repository.
 
 ## Quickstart
 
@@ -62,7 +74,7 @@ ghostbook \
   --book-title "Engineering Handbook"
 ```
 
-Open http://127.0.0.1:8090 in a browser to read the starter book, or open the printed Guide URL to copy ready-made MCP connection snippets for Claude, ChatGPT, Gemini, and Cursor.
+Open http://127.0.0.1:8090 in a browser to read the starter book, or open the printed Guide URL to copy ready-made MCP connection snippets for Claude, ChatGPT, Gemini, Antigravity, and Cursor.
 
 ## Architecture
 
