@@ -423,7 +423,7 @@ html, body {
   flex-direction: column;
 }
 
-/* Top Executive Studio Bar */
+/* Top Studio Bar */
 .studio-topbar {
   position: sticky;
   top: 0;
@@ -925,7 +925,7 @@ html, body {
   border-radius: 0;
 }
 
-/* Classic Booktabs Financial Tables */
+/* Classic Booktabs Tables */
 .book-prose table {
   width: 100%;
   max-width: 100%;
@@ -1343,7 +1343,6 @@ mark {
   .book-prose table {
     font-size: 12.5px;
   }
-  .table-scroll-wrap .book-prose table,
   .book-prose .table-scroll-wrap table {
     display: table;
     width: 100%;

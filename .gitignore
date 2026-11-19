@@ -4,4 +4,7 @@ data/
 *.db
 *.db-shm
 *.db-wal
+.env
+*.env
+coverage.out
 .DS_Store

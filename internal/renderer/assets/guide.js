@@ -2,12 +2,31 @@ const BASE_URL = document.body.getAttribute('data-base-url') || window.location.
 const MCP_SERVER_NAME = document.body.getAttribute('data-mcp-name') || 'ghostbook';
 let CACHED_URL_AUTH_SEGMENT = null;
 
+function safeGetGuideStorage(key) {
+  try {
+    return localStorage.getItem(key) || '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function safeSetGuideStorage(key, val) {
+  try {
+    localStorage.setItem(key, val);
+  } catch (_) {}
+}
+
 function captureAndScrubUrlAuthSegment() {
   const pathMatch = window.location.pathname.match(/^\/u\/([^/]+)/);
   if (!pathMatch || !pathMatch[1]) {
     return null;
   }
-  const rawSeg = decodeURIComponent(pathMatch[1]);
+  let rawSeg = pathMatch[1];
+  try {
+    rawSeg = decodeURIComponent(pathMatch[1]);
+  } catch (_) {
+    rawSeg = pathMatch[1];
+  }
   if (rawSeg.includes(':')) {
     CACHED_URL_AUTH_SEGMENT = rawSeg;
   }
@@ -37,7 +56,7 @@ function resolveUrlAuthSegmentForEmail(email, authorId) {
 
 function selectGuideProfile(email, displayName, explicitAuthSegment, authorId) {
   if (email) {
-    localStorage.setItem('ghostbook_author', email);
+    safeSetGuideStorage('ghostbook_author', email);
   }
   const urlSeg = explicitAuthSegment || resolveUrlAuthSegmentForEmail(email, authorId);
   const effectiveEmail = email || 'you@example.com';
@@ -70,19 +89,40 @@ function selectGuideProfile(email, displayName, explicitAuthSegment, authorId) {
   }
 }
 
+function copyTextFallback(txt) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
 function copyTextFrom(elId, btn) {
   const el = document.getElementById(elId);
   if (!el) return;
   const txt = (el.textContent || '').trim().replace(/^“|”$/g, '');
-  if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
-    return;
-  }
-  navigator.clipboard.writeText(txt).then(() => {
+  const showCopied = () => {
     if (!btn) return;
     const orig = btn.textContent;
     btn.textContent = '✓ Copied!';
     setTimeout(() => { btn.textContent = orig; }, 1600);
-  }).catch(() => {});
+  };
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    navigator.clipboard.writeText(txt).then(showCopied).catch(() => {
+      if (copyTextFallback(txt)) showCopied();
+    });
+    return;
+  }
+  if (copyTextFallback(txt)) showCopied();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -93,7 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const matched = buttons.find(btn => {
       const e = (btn.getAttribute('data-author-email') || '').toLowerCase();
       const id = (btn.getAttribute('data-author-id') || '').toLowerCase();
-      return e === aliasPart || id === aliasPart || (e && aliasPart.startsWith(e.split('@')[0]));
+      return e === aliasPart || (id && id === aliasPart);
     });
     if (matched) {
       selectGuideProfile(
@@ -108,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  const savedAuthor = (localStorage.getItem('ghostbook_author') || '').toLowerCase();
+  const savedAuthor = safeGetGuideStorage('ghostbook_author').toLowerCase();
   const savedBtn = buttons.find(btn => (btn.getAttribute('data-author-email') || '').toLowerCase() === savedAuthor);
   const initialBtn = savedBtn || buttons[0];
   if (initialBtn) {

@@ -1009,7 +1009,7 @@ func TestPermalinkRoutes_OutdatedRenamedMovedAndDeletedBanners(t *testing.T) {
 	if respAgent.Header.Get("X-Robots-Tag") != server.RobotsTagHeaderValue || respAgent.Header.Get("Referrer-Policy") != "no-referrer" {
 		t.Fatalf("missing X-Robots-Tag or Referrer-Policy on /: %v", respAgent.Header)
 	}
-	if !strings.Contains(string(rawAgent), `<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">`) {
+	if !strings.Contains(string(rawAgent), `<meta name="robots" content="noindex, nofollow, noarchive, noimageindex">`) {
 		t.Fatalf("missing robots meta tag in HTML response")
 	}
 	if server.IsBlockedSearchCrawlerUserAgent("Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0") {
@@ -1151,7 +1151,7 @@ func TestMCPPlatformFeedback_EndToEndAndSilentFrictionTelemetry(t *testing.T) {
 			"summary":      "Bulk chapter renumbering helper in SUMMARY.md",
 			"details":      "After inserting Chapter 5, renumbering Chapters 6-10 took 16 commits.",
 			"chapter_slug": "02-agent-workflow",
-			"revision_sha": "r179",
+			"revision_sha": "r12",
 		},
 	})
 	if err != nil || fbRes.IsError {
@@ -1167,7 +1167,7 @@ func TestMCPPlatformFeedback_EndToEndAndSilentFrictionTelemetry(t *testing.T) {
 	}
 
 	mu.Lock()
-	if len(capturedEmails) != 1 || capturedEmails[0].ReplyTo != "Carol Park <carol@example.com>" {
+	if len(capturedEmails) != 1 || capturedEmails[0].ReplyTo != `"Carol Park" <carol@example.com>` {
 		t.Fatalf("expected 1 feedback email with Carol Reply-To, got %+v", capturedEmails)
 	}
 	mu.Unlock()

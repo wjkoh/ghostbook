@@ -44,7 +44,7 @@ type ChapterSummaryItem struct {
 	LiveURL          string `json:"live_url" jsonschema:"Direct browser URL to view the rendered chapter"`
 	RevisionNumber   int32  `json:"revision_number" jsonschema:"1-based sequential repository revision number (e.g. 4 for r4)"`
 	PermalinkURL     string `json:"permalink_url" jsonschema:"Permanent revision URL pinned to this chapter's current commit SHA"`
-	PartTitle        string `json:"part_title,omitempty" jsonschema:"Part header title in SUMMARY.md under which this chapter is grouped (e.g. Part I — Strategic Thesis)"`
+	PartTitle        string `json:"part_title,omitempty" jsonschema:"Part header title in SUMMARY.md under which this chapter is grouped (e.g. Part I: Architecture & Workflow)"`
 	Depth            int32  `json:"depth" jsonschema:"Hierarchy depth in SUMMARY.md (0 for top-level chapter, 1 for sub-chapter)"`
 	ParentSlug       string `json:"parent_slug,omitempty" jsonschema:"Parent chapter slug if this is an indented sub-chapter"`
 	NumberLabel      string `json:"number_label,omitempty" jsonschema:"Hierarchical chapter number (e.g. 1, 1.1, 1.2, 2)"`
@@ -60,8 +60,8 @@ type GetTableOfContentsOutput struct {
 }
 
 type ReadChapterInput struct {
-	Slug     string `json:"slug" jsonschema:"Chapter slug to read, such as 00-preface or 01-mfo-stack-teardown"`
-	Revision string `json:"revision,omitempty" jsonschema:"Optional revision SHA (e.g. 6ca162a) or sequential revision number (e.g. r1, r2) to read a historical permalink snapshot"`
+	Slug     string `json:"slug" jsonschema:"Chapter slug to read, such as 00-preface or 01-system-architecture"`
+	Revision string `json:"revision,omitempty" jsonschema:"Optional revision SHA (e.g. a1b2c3d) or sequential revision number (e.g. r1, r2) to read a historical permalink snapshot"`
 }
 
 type ReadChapterOutput struct {
@@ -89,7 +89,7 @@ type ReadChapterOutput struct {
 }
 
 type SearchBookInput struct {
-	Query string `json:"query" jsonschema:"Search query keywords, exact phrase, or number/symbol (e.g. 'SQLite', '$2.8B', '[TODO') for full-text BM25 and line-level find"`
+	Query string `json:"query" jsonschema:"Search query keywords, exact phrase, or number/symbol (e.g. 'SQLite', 'p99 < 2ms', '[TODO') for full-text BM25 and line-level find"`
 	Slug  string `json:"slug,omitempty" jsonschema:"Optional chapter slug to restrict search/find to a single chapter"`
 	Limit int32  `json:"limit,omitempty" jsonschema:"Maximum number of chapter results to return (default 10)"`
 }
@@ -118,7 +118,7 @@ type ChapterPatchHunk struct {
 }
 
 type PatchChapterInput struct {
-	Slug                string             `json:"slug" jsonschema:"Target chapter slug (e.g. 01-mfo-stack-teardown, SUMMARY, or STYLE_GUIDE)"`
+	Slug                string             `json:"slug" jsonschema:"Target chapter slug (e.g. 01-system-architecture, SUMMARY, or STYLE_GUIDE)"`
 	OldText             string             `json:"old_text,omitempty" jsonschema:"Exact contiguous Markdown text in the chapter to replace; must match uniquely (optional if patches array is used)"`
 	NewText             string             `json:"new_text,omitempty" jsonschema:"Replacement Markdown text (optional if patches array is used)"`
 	Patches             []ChapterPatchHunk `json:"patches,omitempty" jsonschema:"Optional array of surgical {old_text, new_text} hunks to apply atomically in a single Git commit"`
@@ -141,7 +141,7 @@ type CreateChapterInput struct {
 	Title           string `json:"title" jsonschema:"Chapter title to register in SUMMARY.md"`
 	InitialMarkdown string `json:"initial_markdown" jsonschema:"Initial Markdown body of the chapter"`
 	ParentSlug      string `json:"parent_slug,omitempty" jsonschema:"Optional parent chapter slug for indented sub-chapters"`
-	PartTitle       string `json:"part_title,omitempty" jsonschema:"Optional Part header title in SUMMARY.md (e.g. Part I — Market & Portfolio) to group the chapter under"`
+	PartTitle       string `json:"part_title,omitempty" jsonschema:"Optional Part header title in SUMMARY.md (e.g. Part I: Architecture & Workflow) to group the chapter under"`
 	CommitMessage   string `json:"commit_message,omitempty" jsonschema:"Optional commit summary"`
 	AuthorName      string `json:"author_name,omitempty" jsonschema:"Optional author override"`
 }
@@ -170,7 +170,7 @@ type CommitEntryItem struct {
 }
 
 type ListRecentChangesOutput struct {
-	Commits []CommitEntryItem `json:"commits" jsonschema:"Chronological list of Git commits"`
+	Commits []CommitEntryItem `json:"commits" jsonschema:"Reverse-chronological list of Git commits (newest first)"`
 }
 
 type GetCommitDiffInput struct {
@@ -261,8 +261,8 @@ type ReportPlatformFeedbackInput struct {
 	Kind        string `json:"kind,omitempty" jsonschema:"Feedback category: bug, feature_request, or ux_friction (defaults to feature_request)"`
 	Summary     string `json:"summary" jsonschema:"Concise single-line summary of the bug, UX friction, or feature request (5 to 200 characters)"`
 	Details     string `json:"details,omitempty" jsonschema:"Reproduction steps, desired workflow, error output, or rationale (up to 8,000 characters)"`
-	ChapterSlug string `json:"chapter_slug,omitempty" jsonschema:"Optional chapter or meta slug (e.g. 05-ai-native-service, SUMMARY, STYLE_GUIDE) where the issue or workflow occurred"`
-	RevisionSHA string `json:"revision_sha,omitempty" jsonschema:"Optional Git commit SHA or revision label (e.g. r179 or 15ed76b) related to the report"`
+	ChapterSlug string `json:"chapter_slug,omitempty" jsonschema:"Optional chapter or meta slug (e.g. 01-system-architecture, SUMMARY, STYLE_GUIDE) where the issue or workflow occurred"`
+	RevisionSHA string `json:"revision_sha,omitempty" jsonschema:"Optional Git commit SHA or revision label (e.g. r4 or a1b2c3d) related to the report"`
 }
 
 type ReportPlatformFeedbackOutput struct {

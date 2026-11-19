@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/format/index"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
@@ -40,20 +41,20 @@ const defaultStyleGuideMarkdown = `# Editorial Style Guide
 Apply targeted chapter updates directly via patch_chapter. For major structural refactors that reshape co-authors' sections, stage an indented sub-page under parent_slug with a draft- slug prefix, let co-authors' AI agents review and edit the draft directly, and once aligned patch the canonical parent slug and call delete_chapter with replaced_by_slug set to the parent slug.
 `
 
-// defaultTestBootstrapFiles provides a neutral starter book used when initializing
+// defaultBootstrapFiles provides a neutral starter book used when initializing
 // a brand-new empty repository directory (for local quickstart or offline tests).
-var defaultTestBootstrapFiles = map[string]string{
+var defaultBootstrapFiles = map[string]string{
 	"STYLE_GUIDE.md": defaultStyleGuideMarkdown,
 	"SUMMARY.md": `# Summary
 
 [Introduction: Living Book Handbook](00-intro.md)
 [Preface: Why Agents Write](00-preface.md)
 
-# Part I — Architecture & Workflow
+# Part I: Architecture & Workflow
 - [Chapter 1: System Architecture](01-system-architecture.md)
 - [Chapter 2: Agent Authoring Workflow](02-agent-workflow.md)
 
-# Part II — Lineage & Operations
+# Part II: Lineage & Operations
 - [Chapter 3: Immutable Git Lineage](03-editorial-lineage.md)
 - [Chapter 4: Single-Binary Deployment](04-deployment-ops.md)
 
@@ -62,7 +63,7 @@ var defaultTestBootstrapFiles = map[string]string{
 `,
 	"00-intro.md": `# Introduction: Living Book Handbook
 
-Monday, November 9, 2026 · Co-Authors: Alice Chen, Bob Rivera, Carol Park
+Living Edition · Co-Authors: Alice Chen, Bob Rivera, Carol Park
 
 ## 1. Purpose
 
@@ -70,7 +71,7 @@ Ghostbook establishes a single, Git-backed, AI-native book where humans read cle
 `,
 	"00-preface.md": `# Preface: Why Agents Write
 
-Monday, November 9, 2026 · Co-Authors: Alice Chen, Bob Rivera, Carol Park
+Living Edition · Co-Authors: Alice Chen, Bob Rivera, Carol Park
 
 ## 1. Beyond Browser Editors
 
@@ -78,7 +79,7 @@ Removing the browser WYSIWYG editor keeps every change atomic, attributed to a r
 `,
 	"01-system-architecture.md": `# Chapter 1: System Architecture
 
-Monday, November 9, 2026 · Co-Authors: Alice Chen, Bob Rivera, Carol Park
+Living Edition · Co-Authors: Alice Chen, Bob Rivera, Carol Park
 
 ## 1. Core Components
 
@@ -90,7 +91,7 @@ Full-text indexing combines SQLite FTS5 BM25 ranking with exact 1-based line mat
 `,
 	"02-agent-workflow.md": `# Chapter 2: Agent Authoring Workflow
 
-Monday, November 9, 2026 · Co-Authors: Alice Chen, Bob Rivera, Carol Park
+Living Edition · Co-Authors: Alice Chen, Bob Rivera, Carol Park
 
 ## 1. Surgical Patching
 
@@ -99,13 +100,13 @@ AI agents inspect chapters with read_chapter and apply exact multi-hunk updates 
 ` + "```mermaid\nflowchart LR\n    Agent[\"AI Agent\"] --> MCP[\"Remote MCP\"]\n    MCP --> Git[\"Git Commit\"]\n```\n" + `
 ## 2. Quantitative Notation
 
-Let \(W_0\) denote initial word budget and \(F = \alpha W_0\) denote target floor:
+Let \(f(q, D)\) denote term frequency in document \(D\) of length \(|D|\) with average length \(\bar{L}\):
 
-$$B_2(t) = \max\left(0,\; W(t) - \frac{F}{(1 + r_f)^{T - t}}\right)$$
+$$\text{BM25}(D, q) = \text{IDF}(q) \cdot \frac{f(q, D) \cdot (k_1 + 1)}{f(q, D) + k_1 \cdot \left(1 - b + b \cdot \frac{|D|}{\bar{L}}\right)}$$
 `,
 	"03-editorial-lineage.md": `# Chapter 3: Immutable Git Lineage
 
-Monday, November 9, 2026 · Co-Authors: Alice Chen, Bob Rivera, Carol Park
+Living Edition · Co-Authors: Alice Chen, Bob Rivera, Carol Park
 
 ## 1. Permalink Stability
 
@@ -117,7 +118,7 @@ Quiet-period debouncing groups bursty agent commit sessions into readable execut
 `,
 	"04-deployment-ops.md": `# Chapter 4: Single-Binary Deployment
 
-Monday, November 9, 2026 · Co-Authors: Alice Chen, Bob Rivera, Carol Park
+Living Edition · Co-Authors: Alice Chen, Bob Rivera, Carol Park
 
 ## 1. Zero-Dependency Runtime
 
@@ -129,7 +130,7 @@ Every write triggers a debounced push to a private Git remote alongside a 60-sec
 `,
 	"appendix-a-mcp-reference.md": `# Appendix A: MCP Tool Reference
 
-Monday, November 9, 2026 · Co-Authors: Alice Chen, Bob Rivera, Carol Park
+Living Edition · Co-Authors: Alice Chen, Bob Rivera, Carol Park
 
 ## 1. Protocol Parity
 
@@ -144,26 +145,45 @@ func initOrOpenGitRepo(repoDir, explicitRemoteURL string) (*git.Repository, erro
 
 	remoteURL := strings.TrimSpace(explicitRemoteURL)
 	if remoteURL == "" {
+		remoteURL = strings.TrimSpace(os.Getenv("GHOSTBOOK_REMOTE_URL"))
+	}
+	if remoteURL == "" {
 		remoteURL = strings.TrimSpace(os.Getenv("GITHUB_REMOTE_URL"))
 	}
 	if remoteURL != "" {
+		// Refuse to overwrite or wipe a pre-existing non-empty directory on clone
+		if entries, readErr := os.ReadDir(repoDir); readErr == nil && len(entries) > 0 {
+			return nil, fmt.Errorf("cannot clone git remote into non-empty non-git directory %s", repoDir)
+		}
 		if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir repo parent: %w", err)
 		}
+		auth, authErr := resolveGitAuth(remoteURL)
+		if authErr != nil {
+			return nil, fmt.Errorf("resolve git auth: %w", authErr)
+		}
+		tmpCloneDir, err := os.MkdirTemp(filepath.Dir(repoDir), ".ghostbook-clone-*")
+		if err != nil {
+			return nil, fmt.Errorf("create temp clone dir: %w", err)
+		}
 		cloneCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		repo, err := git.PlainCloneContext(cloneCtx, repoDir, false, &git.CloneOptions{
+		_, err = git.PlainCloneContext(cloneCtx, tmpCloneDir, false, &git.CloneOptions{
 			URL:  remoteURL,
-			Auth: resolveGitAuth(),
+			Auth: auth,
 		})
 		if err == nil {
-			return repo, nil
+			_ = os.Remove(repoDir)
+			if renameErr := os.Rename(tmpCloneDir, repoDir); renameErr != nil {
+				_ = os.RemoveAll(tmpCloneDir)
+				return nil, fmt.Errorf("move cloned repo into place: %w", renameErr)
+			}
+			return git.PlainOpen(repoDir)
 		}
+		_ = os.RemoveAll(tmpCloneDir)
 		if !errors.Is(err, transport.ErrEmptyRemoteRepository) {
-			_ = os.RemoveAll(repoDir)
 			return nil, fmt.Errorf("clone configured git remote: %w", err)
 		}
-		_ = os.RemoveAll(repoDir)
 	}
 
 	if err := os.MkdirAll(filepath.Join(repoDir, "src"), 0o755); err != nil {
@@ -180,15 +200,15 @@ func initOrOpenGitRepo(repoDir, explicitRemoteURL string) (*git.Repository, erro
 		return nil, fmt.Errorf("git worktree: %w", err)
 	}
 
-	names := make([]string, 0, len(defaultTestBootstrapFiles))
-	for name := range defaultTestBootstrapFiles {
+	names := make([]string, 0, len(defaultBootstrapFiles))
+	for name := range defaultBootstrapFiles {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
 	for _, name := range names {
 		dst := filepath.Join(repoDir, "src", name)
-		if err := os.WriteFile(dst, []byte(defaultTestBootstrapFiles[name]), 0o644); err != nil {
+		if err := os.WriteFile(dst, []byte(defaultBootstrapFiles[name]), 0o644); err != nil {
 			return nil, err
 		}
 		if _, err := wt.Add(filepath.ToSlash(filepath.Join("src", name))); err != nil {
@@ -205,6 +225,13 @@ func initOrOpenGitRepo(repoDir, explicitRemoteURL string) (*git.Repository, erro
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initial git commit: %w", err)
+	}
+
+	if remoteURL != "" {
+		_, _ = repo.CreateRemote(&config.RemoteConfig{
+			Name: "origin",
+			URLs: []string{remoteURL},
+		})
 	}
 
 	return repo, nil
@@ -231,7 +258,9 @@ func (e *BookEngine) removeAndCommitPathsLocked(author *store.Author, commitMsg 
 		return "", fmt.Errorf("worktree: %w", err)
 	}
 	for _, p := range removeRelPaths {
-		_, _ = wt.Remove(filepath.ToSlash(p))
+		if _, rmErr := wt.Remove(filepath.ToSlash(p)); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) && !errors.Is(rmErr, git.ErrGlobNoMatches) && !errors.Is(rmErr, index.ErrEntryNotFound) {
+			return "", fmt.Errorf("git rm %s: %w", p, rmErr)
+		}
 	}
 	for _, p := range addRelPaths {
 		if _, err := wt.Add(filepath.ToSlash(p)); err != nil {
@@ -303,9 +332,14 @@ func (e *BookEngine) orderedCommitsLocked() ([]*object.Commit, map[string]int32,
 
 func parseRevisionNumber(raw string) (int, bool) {
 	s := strings.TrimSpace(strings.ToLower(raw))
-	s = strings.TrimPrefix(s, "rev-")
-	s = strings.TrimPrefix(s, "rev")
-	s = strings.TrimPrefix(s, "r")
+	switch {
+	case strings.HasPrefix(s, "rev-"):
+		s = strings.TrimPrefix(s, "rev-")
+	case strings.HasPrefix(s, "rev"):
+		s = strings.TrimPrefix(s, "rev")
+	case strings.HasPrefix(s, "r"):
+		s = strings.TrimPrefix(s, "r")
+	}
 	if s == "" || len(s) > 6 {
 		return 0, false
 	}
@@ -464,53 +498,80 @@ func (e *BookEngine) listCommitsLocked(slug string, limit int) ([]CommitEntryIte
 }
 
 func (e *BookEngine) ConfigureRemote(remoteURL string) error {
+	cleanURL := strings.TrimSpace(remoteURL)
+	if cleanURL == "" {
+		return fmt.Errorf("%w: remote URL cannot be empty", ErrInvalidArgument)
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	_ = e.repo.DeleteRemote("origin")
 	_, err := e.repo.CreateRemote(&config.RemoteConfig{
 		Name: "origin",
-		URLs: []string{remoteURL},
+		URLs: []string{cleanURL},
 	})
 	return err
 }
 
-func resolveSSHHostKeyCallback() ssh.HostKeyCallback {
+func resolveSSHHostKeyCallback() (ssh.HostKeyCallback, error) {
 	if khPath := strings.TrimSpace(os.Getenv("GITHUB_KNOWN_HOSTS_PATH")); khPath != "" {
-		if cb, err := knownhosts.New(khPath); err == nil {
-			return cb.HostKeyCallback()
-		} else {
-			slog.Warn("git_ssh_known_hosts_load_failed", "path", khPath, "error", err)
+		cb, err := knownhosts.New(khPath)
+		if err != nil {
+			return nil, fmt.Errorf("load GITHUB_KNOWN_HOSTS_PATH (%s): %w", khPath, err)
 		}
+		return cb.HostKeyCallback(), nil
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		defaultKH := filepath.Join(home, ".ssh", "known_hosts")
 		if _, statErr := os.Stat(defaultKH); statErr == nil {
 			if cb, err := knownhosts.New(defaultKH); err == nil {
-				return cb.HostKeyCallback()
+				return cb.HostKeyCallback(), nil
 			}
 		}
 	}
-	return ssh.InsecureIgnoreHostKey()
+	insecure := strings.ToLower(strings.TrimSpace(os.Getenv("GHOSTBOOK_INSECURE_IGNORE_HOST_KEY")))
+	if insecure == "true" || insecure == "1" {
+		slog.Warn("git_ssh_insecure_ignore_host_key_enabled")
+		return ssh.InsecureIgnoreHostKey(), nil
+	}
+	return nil, fmt.Errorf("no valid SSH known_hosts file found (set GITHUB_KNOWN_HOSTS_PATH or populate ~/.ssh/known_hosts)")
 }
 
-func resolveGitAuth() transport.AuthMethod {
-	if keyPath := strings.TrimSpace(os.Getenv("GITHUB_SSH_KEY_PATH")); keyPath != "" {
-		pk, err := gitssh.NewPublicKeysFromFile("git", keyPath, "")
-		if err != nil {
-			slog.Warn("git_ssh_key_load_failed", "path", keyPath, "error", err)
-		} else {
-			pk.HostKeyCallback = resolveSSHHostKeyCallback()
-			return pk
+func isSSHRemoteURL(remoteURL string) bool {
+	u := strings.TrimSpace(strings.ToLower(remoteURL))
+	return strings.HasPrefix(u, "ssh://") || strings.HasPrefix(u, "git@")
+}
+
+func isHTTPRemoteURL(remoteURL string) bool {
+	u := strings.TrimSpace(strings.ToLower(remoteURL))
+	return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://")
+}
+
+func resolveGitAuth(remoteURL string) (transport.AuthMethod, error) {
+	if isSSHRemoteURL(remoteURL) {
+		if keyPath := strings.TrimSpace(os.Getenv("GITHUB_SSH_KEY_PATH")); keyPath != "" {
+			pk, err := gitssh.NewPublicKeysFromFile("git", keyPath, "")
+			if err != nil {
+				return nil, fmt.Errorf("load GITHUB_SSH_KEY_PATH (%s): %w", keyPath, err)
+			}
+			cb, err := resolveSSHHostKeyCallback()
+			if err != nil {
+				return nil, err
+			}
+			pk.HostKeyCallback = cb
+			return pk, nil
+		}
+		return nil, nil
+	}
+	if isHTTPRemoteURL(remoteURL) {
+		if pat := strings.TrimSpace(os.Getenv("GITHUB_PAT")); pat != "" {
+			return &githttp.BasicAuth{
+				Username: "x-access-token",
+				Password: pat,
+			}, nil
 		}
 	}
-	if pat := strings.TrimSpace(os.Getenv("GITHUB_PAT")); pat != "" {
-		return &githttp.BasicAuth{
-			Username: "x-access-token",
-			Password: pat,
-		}
-	}
-	return nil
+	return nil, nil
 }
 
 func isIgnorablePullError(err error) bool {
@@ -524,28 +585,35 @@ func isIgnorablePullError(err error) bool {
 	return strings.Contains(msg, "couldn't find remote ref")
 }
 
-func (e *BookEngine) hasOriginRemote() bool {
+func (e *BookEngine) originRemoteURL() (string, bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	remotes, err := e.repo.Remotes()
-	return err == nil && len(remotes) > 0
+	rem, err := e.repo.Remote("origin")
+	if err != nil || rem == nil || len(rem.Config().URLs) == 0 {
+		return "", false
+	}
+	return rem.Config().URLs[0], true
 }
 
 // pullAndPushOrigin synchronizes e.repo with the configured "origin" remote using bounded
-// 15-second context timeouts derived from ctx, serializing .git filesystem access safely.
+// 15-second context timeouts derived from ctx, holding exclusive write lock only during pull
+// and downgrading to a read lock during push so readers are not blocked by slow remotes.
 func (e *BookEngine) pullAndPushOrigin(ctx context.Context) (bool, error) {
-	if ctx.Err() != nil || !e.hasOriginRemote() {
+	remoteURL, ok := e.originRemoteURL()
+	if ctx.Err() != nil || !ok {
 		return false, ctx.Err()
 	}
 
-	auth := resolveGitAuth()
+	auth, authErr := resolveGitAuth(remoteURL)
+	if authErr != nil {
+		return false, fmt.Errorf("git auth: %w", authErr)
+	}
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	headBefore, _ := e.headCommitLocked()
 	wt, wtErr := e.repo.Worktree()
 	if wtErr != nil {
+		e.mu.Unlock()
 		return false, fmt.Errorf("git worktree: %w", wtErr)
 	}
 
@@ -556,6 +624,7 @@ func (e *BookEngine) pullAndPushOrigin(ctx context.Context) (bool, error) {
 	})
 	cancelPull()
 	if !isIgnorablePullError(pullErr) {
+		e.mu.Unlock()
 		return false, fmt.Errorf("git pull origin: %w", pullErr)
 	}
 
@@ -564,16 +633,19 @@ func (e *BookEngine) pullAndPushOrigin(ctx context.Context) (bool, error) {
 	if headBefore != nil && headAfter != nil && headBefore.Hash != headAfter.Hash {
 		pulledNewCommits = true
 	}
+	e.mu.Unlock()
 
 	if ctx.Err() != nil {
 		return pulledNewCommits, ctx.Err()
 	}
+	e.mu.RLock()
 	pushCtx, cancelPush := context.WithTimeout(ctx, 15*time.Second)
 	pushErr := e.repo.PushContext(pushCtx, &git.PushOptions{
 		RemoteName: "origin",
 		Auth:       auth,
 	})
 	cancelPush()
+	e.mu.RUnlock()
 	if pushErr != nil && !errors.Is(pushErr, git.NoErrAlreadyUpToDate) {
 		return pulledNewCommits, fmt.Errorf("git push origin: %w", pushErr)
 	}

@@ -39,9 +39,9 @@ type AlertNotifier struct {
 }
 
 func NewAlertNotifier(apiKey, endpoint, baseURL string, cooldown time.Duration, mailCfg ...MailConfig) *AlertNotifier {
-	ep := strings.TrimSpace(endpoint)
+	ep := strings.TrimRight(strings.TrimSpace(endpoint), "/")
 	key := strings.TrimSpace(apiKey)
-	if ep == "" || ep == DefaultResendEndpoint {
+	if ep == "" || ep == strings.TrimRight(DefaultResendEndpoint, "/") {
 		if testing.Testing() {
 			// Never dispatch real production Resend emails during `go test` when no mock endpoint is provided.
 			key = ""

@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -205,16 +207,49 @@ func splitEmailRoutePath(p string) (rawEmailPart, suffix string, ok bool) {
 	return rest[:slashIdx], rest[slashIdx:], true
 }
 
+type noStoreResponseWriter struct {
+	http.ResponseWriter
+}
+
+func (w *noStoreResponseWriter) enforceNoStore() {
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Del("Expires")
+}
+
+func (w *noStoreResponseWriter) WriteHeader(code int) {
+	w.enforceNoStore()
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *noStoreResponseWriter) Write(b []byte) (int, error) {
+	w.enforceNoStore()
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *noStoreResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *noStoreResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 func EmailURLRouterMiddleware(eng *engine.BookEngine, mcpHandler http.Handler, connectHandler http.Handler, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/u/") {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Never allow shared proxies or browsers to cache secret-bearing /u/... URLs.
+		nw := &noStoreResponseWriter{ResponseWriter: w}
+		nw.enforceNoStore()
+
 		rawEmailPart, suffix, ok := splitEmailRoutePath(r.URL.Path)
 		if !ok {
 			slog.Warn("email_route_rejected", "path", redactSecretInPath(r.URL.Path), "reason", "malformed_path", "remote_addr", r.RemoteAddr)
-			writeUnauthorized(w, "malformed /u/{email}/... URL path")
+			writeUnauthorized(nw, "malformed /u/{email}/... URL path")
 			return
 		}
 
@@ -226,7 +261,7 @@ func EmailURLRouterMiddleware(eng *engine.BookEngine, mcpHandler http.Handler, c
 		author, err := eng.Store().Authenticate(ctx, decodedEmail)
 		if err != nil {
 			slog.Warn("email_route_rejected", "path", redactSecretInPath(r.URL.Path), "reason", "unrecognized_author", "remote_addr", r.RemoteAddr)
-			writeUnauthorized(w, "unrecognized or revoked co-author email in URL path")
+			writeUnauthorized(nw, "unrecognized or revoked co-author email in URL path")
 			return
 		}
 		ctx = engine.WithAuthor(ctx, author)
@@ -236,11 +271,11 @@ func EmailURLRouterMiddleware(eng *engine.BookEngine, mcpHandler http.Handler, c
 
 		switch {
 		case suffix == "/mcp" || strings.HasPrefix(suffix, "/mcp/"):
-			mcpHandler.ServeHTTP(w, r2)
+			mcpHandler.ServeHTTP(nw, r2)
 		case strings.HasPrefix(suffix, "/book.v1.BookService/"):
-			connectHandler.ServeHTTP(w, r2)
+			connectHandler.ServeHTTP(nw, r2)
 		default:
-			next.ServeHTTP(w, r2)
+			next.ServeHTTP(nw, r2)
 		}
 	})
 }
@@ -297,6 +332,11 @@ func handleGitHubWebhook(eng *engine.BookEngine) http.HandlerFunc {
 		r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "read body failed", http.StatusBadRequest)
 			return
 		}
@@ -371,6 +411,51 @@ type HTTPHandlerOptions struct {
 
 const maxRPCBodyBytes = 16 << 20
 
+func stripHostPortLower(rawHost string) string {
+	h := strings.ToLower(strings.TrimSpace(rawHost))
+	if h == "" {
+		return ""
+	}
+	if parsedHost, _, err := net.SplitHostPort(h); err == nil {
+		return strings.Trim(parsedHost, "[]")
+	}
+	return strings.Trim(h, "[]")
+}
+
+func allowedHostsMiddleware(baseURL string, allowedHosts []string, next http.Handler) http.Handler {
+	if len(allowedHosts) == 0 {
+		return next
+	}
+	allowSet := map[string]bool{
+		"localhost": true,
+		"127.0.0.1": true,
+		"::1":       true,
+	}
+	if u, err := url.Parse(strings.TrimSpace(baseURL)); err == nil && u.Host != "" {
+		allowSet[strings.ToLower(u.Host)] = true
+		allowSet[stripHostPortLower(u.Host)] = true
+	}
+	for _, h := range allowedHosts {
+		clean := strings.ToLower(strings.TrimSpace(h))
+		if clean != "" {
+			allowSet[clean] = true
+			allowSet[stripHostPortLower(clean)] = true
+		}
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		reqHost := strings.ToLower(strings.TrimSpace(r.Host))
+		if reqHost != "" && !allowSet[reqHost] && !allowSet[stripHostPortLower(reqHost)] {
+			http.Error(w, "misdirected request: host not allowed", http.StatusMisdirectedRequest)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func NewHTTPHandler(eng *engine.BookEngine, opts ...HTTPHandlerOptions) http.Handler {
 	var cfg HTTPHandlerOptions
 	if len(opts) > 0 {
@@ -405,23 +490,29 @@ func NewHTTPHandler(eng *engine.BookEngine, opts ...HTTPHandlerOptions) http.Han
 		serveWebStudio(eng, cfg.URLPrefixStrip, w, r)
 	})
 
-	return requestLoggerMiddleware(eng, EmailURLRouterMiddleware(eng, mcpHTTPHandler, connectHandler, mux))
+	return allowedHostsMiddleware(eng.BaseURL(), cfg.AllowedHosts,
+		requestLoggerMiddleware(eng, EmailURLRouterMiddleware(eng, mcpHTTPHandler, connectHandler, mux)))
 }
 
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
-	bytes  int
+	status      int
+	bytes       int
+	wroteHeader bool
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
-	r.status = code
+	if !r.wroteHeader {
+		r.status = code
+		r.wroteHeader = true
+	}
 	r.ResponseWriter.WriteHeader(code)
 }
 
 func (r *statusRecorder) Write(b []byte) (int, error) {
-	if r.status == 0 {
+	if !r.wroteHeader {
 		r.status = http.StatusOK
+		r.wroteHeader = true
 	}
 	n, err := r.ResponseWriter.Write(b)
 	r.bytes += n
@@ -444,13 +535,16 @@ func redactSecretInPath(p string) string {
 	}
 	rawEmailPart, suffix, ok := splitEmailRoutePath(p)
 	if !ok {
-		return p
+		return "/u/***"
 	}
-	if colonIdx := strings.IndexByte(rawEmailPart, ':'); colonIdx > 0 {
+	if colonIdx := strings.IndexByte(rawEmailPart, ':'); colonIdx >= 0 {
 		return "/u/" + rawEmailPart[:colonIdx] + ":***" + suffix
 	}
-	if pctIdx := strings.Index(strings.ToLower(rawEmailPart), "%3a"); pctIdx > 0 {
+	if pctIdx := strings.Index(strings.ToLower(rawEmailPart), "%3a"); pctIdx >= 0 {
 		return "/u/" + rawEmailPart[:pctIdx] + ":***" + suffix
+	}
+	if !strings.Contains(rawEmailPart, "@") {
+		return "/u/***" + suffix
 	}
 	return p
 }
@@ -463,10 +557,10 @@ const RobotsTagHeaderValue = "noindex, nofollow, noarchive, nosnippet, noimagein
 const InteractiveFetcherRobotsTagHeaderValue = "noindex, nofollow, noarchive, noimageindex, notranslate"
 
 // DefaultContentSecurityPolicy enforces strict self-hosted origin boundaries and blocks all browser XHR/Fetch/WebSocket calls (connect-src 'none') on book reader pages.
-const DefaultContentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+const DefaultContentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
 
 // APIDocsContentSecurityPolicy scopes standalone /api-docs (self-hosted Scalar OpenAPI viewer) strictly to same-origin scripts, styles, and /openapi.json + ConnectRPC test requests, blocking all external CDNs, fonts, and proxies.
-const APIDocsContentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+const APIDocsContentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
 
 // RobotsTxtBody explicitly allows user-initiated interactive AI link fetchers (RFC 9309 specific-group precedence)
 // while disallowing all search engine spiders, SEO crawlers, and bulk AI training scrapers across the entire site.
@@ -662,22 +756,6 @@ var externalInteractiveFetcherTokens = []string{
 	"meta-externalfetcher",
 }
 
-var allowedInteractiveAgentTokens = []string{
-	"chatgpt-user",
-	"claude-user",
-	"claude-web",
-	"perplexity-user",
-	"oai-operator",
-	"google-notebooklm",
-	"google-cloudvertexbot",
-	"mistralai-user",
-	"duckassistbot",
-	"meta-externalfetcher",
-	"antigravity",
-	"agy-cli",
-	"agy/",
-}
-
 // IsExternalInteractiveFetcherUserAgent returns true if the User-Agent identifies an external user-initiated AI link reader
 // (such as Claude-User, ChatGPT-User, Perplexity-User, or Google-NotebookLM).
 func IsExternalInteractiveFetcherUserAgent(ua string) bool {
@@ -694,7 +772,7 @@ func IsExternalInteractiveFetcherUserAgent(ua string) bool {
 }
 
 // IsBlockedSearchCrawlerUserAgent returns true if the User-Agent string belongs to a known search engine indexing spider,
-// SEO crawler, or bulk web archiver, while allowing direct AI agent tools (agy, curl, Go-http-client, ChatGPT-User, Claude-User, MCP clients) and browsers.
+// SEO crawler, or bulk web archiver, while allowing direct AI agent tools (curl, Go-http-client, ChatGPT-User, Claude-User, MCP clients) and browsers.
 func IsBlockedSearchCrawlerUserAgent(ua string) bool {
 	lower := strings.ToLower(strings.TrimSpace(ua))
 	if lower == "" {
@@ -705,11 +783,6 @@ func IsBlockedSearchCrawlerUserAgent(ua string) bool {
 			return true
 		}
 	}
-	for _, allow := range allowedInteractiveAgentTokens {
-		if strings.Contains(lower, allow) {
-			return false
-		}
-	}
 	return false
 }
 
@@ -718,8 +791,7 @@ func isAuthenticatedAgentRoute(r *http.Request) bool {
 	return strings.HasPrefix(p, "/u/") ||
 		p == "/mcp" ||
 		strings.HasPrefix(p, "/mcp/") ||
-		strings.HasPrefix(p, "/book.v1.BookService/") ||
-		strings.TrimSpace(r.Header.Get("Authorization")) != ""
+		strings.HasPrefix(p, "/book.v1.BookService/")
 }
 
 func requestLoggerMiddleware(eng *engine.BookEngine, next http.Handler) http.Handler {
@@ -733,6 +805,8 @@ func requestLoggerMiddleware(eng *engine.BookEngine, next http.Handler) http.Han
 			w.Header().Set("X-Robots-Tag", RobotsTagHeaderValue)
 		}
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Content-Security-Policy", DefaultContentSecurityPolicy)
 		if r.URL.Path != "/robots.txt" && r.URL.Path != "/healthz" && !isAuthenticatedAgentRoute(r) && IsBlockedSearchCrawlerUserAgent(ua) {
 			slog.Warn("http_crawler_blocked", "method", r.Method, "path", safePath, "ua", ua)
@@ -748,7 +822,7 @@ func requestLoggerMiddleware(eng *engine.BookEngine, next http.Handler) http.Han
 				if eng != nil {
 					eng.NotifyAlert(r.Context(), "http_panic", fmt.Sprintf("Panic on %s %s: %v", r.Method, safePath, recVal), stack)
 				}
-				if rec.bytes == 0 {
+				if !rec.wroteHeader {
 					http.Error(w, "internal server error", http.StatusInternalServerError)
 				}
 			}
@@ -762,7 +836,7 @@ func requestLoggerMiddleware(eng *engine.BookEngine, next http.Handler) http.Han
 		}
 		durationMs := time.Since(start).Milliseconds()
 		if rec.status >= 500 && eng != nil {
-			eng.NotifyAlert(r.Context(), "http_5xx_"+safePath, fmt.Sprintf("HTTP %d on %s %s", rec.status, r.Method, safePath), fmt.Sprintf("RemoteAddr: %s\nStatus: %d\nDurationMs: %d", r.RemoteAddr, rec.status, durationMs))
+			eng.NotifyAlert(r.Context(), "http_5xx", fmt.Sprintf("HTTP %d on %s %s", rec.status, r.Method, safePath), fmt.Sprintf("RemoteAddr: %s\nStatus: %d\nDurationMs: %d", r.RemoteAddr, rec.status, durationMs))
 		}
 		if rec.status >= 400 {
 			slog.Warn("http_request",
@@ -797,13 +871,38 @@ func requestLoggerMiddleware(eng *engine.BookEngine, next http.Handler) http.Han
 
 func normalizeStudioPath(rawPath, stripPrefix string) string {
 	cleanPath := strings.TrimSuffix(rawPath, "/")
+	if cleanPath == "" {
+		cleanPath = "/"
+	}
 	if p := strings.TrimSuffix(strings.TrimSpace(stripPrefix), "/"); p != "" {
-		cleanPath = strings.TrimPrefix(cleanPath, p)
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		if cleanPath == p {
+			cleanPath = "/"
+		} else if strings.HasPrefix(cleanPath, p+"/") {
+			cleanPath = strings.TrimPrefix(cleanPath, p)
+		}
 	}
 	if cleanPath == "" {
 		return "/"
 	}
 	return cleanPath
+}
+
+var (
+	immutableHexSHARe = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+	immutableRevNumRe = regexp.MustCompile(`^[rR][0-9]+$`)
+)
+
+// isImmutableRevisionSpec returns true strictly for immutable commit SHAs or sequential rN revisions,
+// never for mutable symbolic refs such as HEAD or branch names.
+func isImmutableRevisionSpec(rev string) bool {
+	trimmed := strings.TrimSpace(rev)
+	if trimmed == "" {
+		return false
+	}
+	return immutableHexSHARe.MatchString(trimmed) || immutableRevNumRe.MatchString(trimmed)
 }
 
 func trimChapterSlugSuffix(raw string) string {
@@ -1153,7 +1252,7 @@ func serveChapterDiagram(eng *engine.BookEngine, snap *renderer.RenderedBook, sl
 			altHTML = fmt.Sprintf("/chapters/%s/rev/%s/diagrams/%d", ch.Slug, ch.LastCommitSHA, diagramIdx)
 		}
 		w.Header().Set("X-Chapter-Is-Latest", strconv.FormatBool(ch.IsLatest || (!isPermalink && rev == "")))
-		writeMarkdownPayload(w, r, mmdBody, rawExact && isPermalink && rev != "", altHTML, canonMD)
+		writeMarkdownPayload(w, r, mmdBody, rawExact && isPermalink && isImmutableRevisionSpec(rev), altHTML, canonMD)
 		return
 	}
 
@@ -1258,7 +1357,7 @@ func serveChapterMarkdown(eng *engine.BookEngine, snap *renderer.RenderedBook, r
 	if isPermalink && readOut.RevisionSHA != "" {
 		altHTMLPath = "/rev/" + readOut.RevisionSHA + "/chapters/" + readOut.Slug
 	}
-	immutable := rawExact && (isPermalink || rev != "") && readOut.RevisionSHA != ""
+	immutable := rawExact && isImmutableRevisionSpec(rev) && readOut.RevisionSHA != ""
 	writeMarkdownPayload(w, r, body, immutable, altHTMLPath, canonMDPath)
 }
 
@@ -1302,7 +1401,7 @@ func serveWebStudio(eng *engine.BookEngine, urlPrefixStrip string, w http.Respon
 	}
 
 	snap := eng.CurrentSnapshot()
-	if snap == nil || len(snap.Chapters) == 0 {
+	if snap == nil {
 		http.Error(w, "book snapshot not initialized", http.StatusServiceUnavailable)
 		return
 	}
@@ -1317,21 +1416,27 @@ func serveWebStudio(eng *engine.BookEngine, urlPrefixStrip string, w http.Respon
 	queryRev := strings.TrimSpace(r.URL.Query().Get("rev"))
 
 	switch {
-	case cleanPath == "/llms.txt" || basePath == "/index" || (basePath == "/" && wantsMarkdown):
+	case cleanPath == "/llms.txt" || (basePath == "/index" && explicitFormat != "html") || (basePath == "/" && wantsMarkdown):
 		res, err := eng.AssembleLLMsIndex(r.Context(), queryRev)
 		if err != nil {
 			writeEngineHTTPError(w, r, err)
 			return
 		}
-		writeMarkdownExportResult(w, r, res, rawExact && queryRev != "", "/", "/llms.txt")
+		writeMarkdownExportResult(w, r, res, rawExact && isImmutableRevisionSpec(queryRev), "/", "/llms.txt")
 
-	case cleanPath == "/llms-full.txt" || basePath == "/book" || (basePath == "/print" && wantsMarkdown):
+	case cleanPath == "/llms-full.txt" || (basePath == "/book" && explicitFormat != "html") || (basePath == "/print" && wantsMarkdown):
 		res, err := eng.AssembleFullBookMarkdown(r.Context(), queryRev)
 		if err != nil {
 			writeEngineHTTPError(w, r, err)
 			return
 		}
-		writeMarkdownExportResult(w, r, res, rawExact && queryRev != "", "/print", "/llms-full.txt")
+		writeMarkdownExportResult(w, r, res, rawExact && isImmutableRevisionSpec(queryRev), "/print", "/llms-full.txt")
+
+	case basePath == "/index" && explicitFormat == "html":
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+
+	case basePath == "/book" && explicitFormat == "html":
+		http.Redirect(w, r, "/print", http.StatusTemporaryRedirect)
 
 	case basePath == "/" || basePath == "/timeline":
 		if basePath == "/timeline" && wantsMarkdown {
@@ -1345,6 +1450,10 @@ func serveWebStudio(eng *engine.BookEngine, urlPrefixStrip string, w http.Respon
 			return
 		}
 		if basePath == "/" && queryRev != "" {
+			if len(snap.Chapters) == 0 {
+				http.NotFound(w, r)
+				return
+			}
 			serveChapterPermalinkOrLive(eng, snap, snap.Chapters[0].Slug, queryRev, true, w, r)
 			return
 		}
@@ -1513,7 +1622,11 @@ func serveWebStudio(eng *engine.BookEngine, urlPrefixStrip string, w http.Respon
 					writeEngineHTTPError(w, r, err)
 					return
 				}
-				writeMarkdownExportResult(w, r, res, rawExact && rest != "", "/rev/"+rest, "/llms.txt")
+				writeMarkdownExportResult(w, r, res, rawExact && isImmutableRevisionSpec(rest), "/rev/"+url.PathEscape(res.RevisionSHA), "/llms.txt")
+				return
+			}
+			if len(snap.Chapters) == 0 {
+				http.NotFound(w, r)
 				return
 			}
 			serveChapterPermalinkOrLive(eng, snap, snap.Chapters[0].Slug, rest, true, w, r)
@@ -1522,23 +1635,23 @@ func serveWebStudio(eng *engine.BookEngine, urlPrefixStrip string, w http.Respon
 		rev := rest[:slashIdx]
 		sub := rest[slashIdx+1:]
 		switch {
-		case sub == "llms.txt" || sub == "index":
+		case sub == "llms.txt" || (sub == "index" && explicitFormat != "html"):
 			res, err := eng.AssembleLLMsIndex(r.Context(), rev)
 			if err != nil {
 				writeEngineHTTPError(w, r, err)
 				return
 			}
-			writeMarkdownExportResult(w, r, res, rawExact && rev != "", "/rev/"+rev, "/llms.txt")
+			writeMarkdownExportResult(w, r, res, rawExact && isImmutableRevisionSpec(rev), "/rev/"+url.PathEscape(res.RevisionSHA), "/llms.txt")
 			return
-		case sub == "llms-full.txt" || sub == "book" || (sub == "print" && wantsMarkdown):
+		case sub == "llms-full.txt" || (sub == "book" && explicitFormat != "html") || (sub == "print" && wantsMarkdown):
 			res, err := eng.AssembleFullBookMarkdown(r.Context(), rev)
 			if err != nil {
 				writeEngineHTTPError(w, r, err)
 				return
 			}
-			writeMarkdownExportResult(w, r, res, rawExact && rev != "", "/print?rev="+rev, "/llms-full.txt")
+			writeMarkdownExportResult(w, r, res, rawExact && isImmutableRevisionSpec(rev), "/print?rev="+url.QueryEscape(res.RevisionSHA), "/llms-full.txt")
 			return
-		case sub == "print":
+		case sub == "print" || (sub == "book" && explicitFormat == "html"):
 			revBook, revErr := eng.RenderBookAtRevision(rev)
 			if revErr != nil {
 				writeEngineHTTPError(w, r, revErr)
@@ -1600,21 +1713,7 @@ func serveWebStudio(eng *engine.BookEngine, urlPrefixStrip string, w http.Respon
 			serveChapterMarkdown(eng, snap, slug, rev, isPermalink, rawExact, w, r)
 			return
 		}
-		if !isPermalink {
-			if ch, ok := snap.BySlug[slug]; ok {
-				renderAndWriteChapter(eng, snap, ch, w, r)
-				return
-			}
-		}
-		if cv, err := eng.RenderChapterAtRevision(r.Context(), slug, rev, isPermalink); err == nil {
-			renderAndWriteChapter(eng, snap, cv, w, r)
-			return
-		} else if isPermalink && rev != "" && errors.Is(err, engine.ErrNotFound) {
-			if tryRelativeSlugRedirect(snap, rev, false, w, r) {
-				return
-			}
-		}
-		http.NotFound(w, r)
+		serveChapterPermalinkOrLive(eng, snap, slug, rev, isPermalink, w, r)
 	}
 }
 

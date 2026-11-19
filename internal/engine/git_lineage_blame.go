@@ -90,15 +90,32 @@ func (e *BookEngine) computeCommitDiffLocked(commitSHA, slug, baseCommitSHA stri
 }
 
 func filterUnifiedDiffByPath(fullPatch, targetPath string) string {
-	chunks := strings.Split(fullPatch, "diff --git ")
-	var kept []string
-	for _, ch := range chunks {
-		if strings.TrimSpace(ch) == "" {
-			continue
+	var blocks []string
+	var cur strings.Builder
+	inBlock := false
+	for _, line := range strings.Split(fullPatch, "\n") {
+		if strings.HasPrefix(line, "diff --git ") {
+			if inBlock {
+				blocks = append(blocks, cur.String())
+				cur.Reset()
+			}
+			inBlock = true
 		}
-		firstLine := strings.SplitN(ch, "\n", 2)[0]
+		if inBlock {
+			if cur.Len() > 0 {
+				cur.WriteByte('\n')
+			}
+			cur.WriteString(line)
+		}
+	}
+	if inBlock && cur.Len() > 0 {
+		blocks = append(blocks, cur.String())
+	}
+	var kept []string
+	for _, blk := range blocks {
+		firstLine := strings.SplitN(blk, "\n", 2)[0]
 		if strings.Contains(firstLine, "a/"+targetPath+" ") || strings.HasSuffix(firstLine, "b/"+targetPath) {
-			kept = append(kept, "diff --git "+ch)
+			kept = append(kept, blk)
 		}
 	}
 	if len(kept) == 0 {
@@ -166,9 +183,18 @@ func detectAddedChapterSlugInCommit(c *object.Commit, _ string) string {
 	if c == nil || c.NumParents() == 0 {
 		return ""
 	}
-	parent, _ := c.Parent(0)
-	parentTree, _ := parent.Tree()
-	curTree, _ := c.Tree()
+	parent, err := c.Parent(0)
+	if err != nil || parent == nil {
+		return ""
+	}
+	parentTree, err := parent.Tree()
+	if err != nil || parentTree == nil {
+		return ""
+	}
+	curTree, err := c.Tree()
+	if err != nil || curTree == nil {
+		return ""
+	}
 	changes, err := parentTree.Diff(curTree)
 	if err != nil {
 		return ""
@@ -194,13 +220,17 @@ func detectAddedChapterSlugInCommit(c *object.Commit, _ string) string {
 
 // followSlugLineageToHead walks chronological commits from startIdx forward to find
 // what happened when relPath ("src/<slug>.md") was removed or renamed, prioritizing
-// explicit [replaced-by: slug] commit hints over tree-diff heuristics.
+// explicit [replaced-by: slug] commit hints over tree-diff heuristics and following
+// multi-hop renames/replacements all the way to HEAD.
 func followSlugLineageToHead(chronological []*object.Commit, startIdx int, initialSlug string) (
 	status string,
 	finalSlug string,
 	finalTitle string,
 	eventCommit *object.Commit,
 ) {
+	if len(chronological) == 0 {
+		return "", "", "", nil
+	}
 	curSlug := initialSlug
 	for i := startIdx + 1; i < len(chronological); i++ {
 		c := chronological[i]
@@ -208,17 +238,17 @@ func followSlugLineageToHead(chronological []*object.Commit, startIdx int, initi
 		if _, exists := readFileAtCommit(c, rel); exists {
 			continue
 		}
-		if eventCommit == nil {
-			eventCommit = c
-		}
 		if hint := extractReplacedByHint(c.Message); hint != "" {
 			status = "deleted"
+			curSlug = hint
 			finalSlug = hint
 			eventCommit = c
-			break
+			continue
 		}
 		if addedSlug := detectAddedChapterSlugInCommit(c, curSlug); addedSlug != "" {
-			status = "moved"
+			if status != "deleted" {
+				status = "moved"
+			}
 			curSlug = addedSlug
 			eventCommit = c
 			continue
@@ -229,7 +259,7 @@ func followSlugLineageToHead(chronological []*object.Commit, startIdx int, initi
 		break
 	}
 	head := chronological[len(chronological)-1]
-	if status == "moved" {
+	if status == "moved" || (status == "deleted" && finalSlug != "") {
 		if _, existsAtHead := readFileAtCommit(head, "src/"+curSlug+".md"); existsAtHead {
 			finalSlug = curSlug
 		} else {
@@ -249,9 +279,13 @@ func (e *BookEngine) resolveTargetCommitForPermalinkLocked(
 	chronological []*object.Commit,
 	relPath, revSpec string,
 ) (*object.Commit, int, string, error) {
+	if len(chronological) == 0 {
+		return nil, -1, "", fmt.Errorf("%w: repository has no commits", ErrNotFound)
+	}
 	headCommit := chronological[len(chronological)-1]
 	targetCommit := headCommit
 	targetIdx := len(chronological) - 1
+	foundInChain := true
 
 	if strings.TrimSpace(revSpec) != "" {
 		resolved, err := e.resolveCommitByPrefixLocked(revSpec)
@@ -259,20 +293,27 @@ func (e *BookEngine) resolveTargetCommitForPermalinkLocked(
 			return nil, -1, "", err
 		}
 		targetCommit = resolved
+		foundInChain = false
 		for i, c := range chronological {
 			if c.Hash == targetCommit.Hash {
 				targetIdx = i
+				foundInChain = true
 				break
 			}
 		}
 	}
 
 	if md, ok := readFileAtCommit(targetCommit, relPath); ok {
+		if !foundInChain {
+			return targetCommit, -1, md, nil
+		}
 		return targetCommit, targetIdx, md, nil
 	}
-	for i := targetIdx; i >= 0; i-- {
-		if md, ok := readFileAtCommit(chronological[i], relPath); ok {
-			return chronological[i], i, md, nil
+	if foundInChain {
+		for i := targetIdx; i >= 0; i-- {
+			if md, ok := readFileAtCommit(chronological[i], relPath); ok {
+				return chronological[i], i, md, nil
+			}
 		}
 	}
 	return nil, -1, "", fmt.Errorf("%w: %s", ErrNotFound, strings.TrimSuffix(strings.TrimPrefix(relPath, "src/"), ".md"))

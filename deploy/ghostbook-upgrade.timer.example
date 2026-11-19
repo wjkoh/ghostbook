@@ -3,7 +3,7 @@ Description=Daily maintenance window check for staged Ghostbook binary upgrades
 
 [Timer]
 OnCalendar=*-*-* 03:00:00 UTC
-Persistent=true
+Persistent=false
 AccuracySec=1min
 
 [Install]

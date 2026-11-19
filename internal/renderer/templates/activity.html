@@ -28,7 +28,10 @@
     <main class="chapter-container wide-ledger-container">
       <article class="book-prose" id="ssrActivityRoot">
         <h1>Agent Tool Audit Log</h1>
-        <p class="home-lead">Immutable SQLite WAL audit trail of authenticated MCP and ConnectRPC tool invocations across Claude, ChatGPT, and Antigravity.</p>
+        <p class="home-lead">Immutable SQLite WAL audit trail of authenticated MCP and ConnectRPC tool invocations across Claude, ChatGPT, Gemini, Cursor, and CLI agents.</p>
+        {{if .AuthorFilter}}
+        <p class="home-lead" id="activityAuthorFilterBanner">Filtered by author: <strong>{{.AuthorFilter}}</strong> · <a href="/activity">Clear filter</a></p>
+        {{end}}
 
         {{if .Entries}}
         <div class="table-scroll-wrap">

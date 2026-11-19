@@ -41,8 +41,8 @@ func TestPatchChapter_ExactMatchAndGitCommit(t *testing.T) {
 	eng, st := setupTestEngine(t)
 	ctx := context.Background()
 
-	samRef, _ := st.ResolveAuthorName(ctx, "alice")
-	alice, err := st.Authenticate(ctx, samRef.AuthIdentifier())
+	aliceRef, _ := st.ResolveAuthorName(ctx, "alice")
+	alice, err := st.Authenticate(ctx, aliceRef.AuthIdentifier())
 	if err != nil {
 		t.Fatalf("authenticate Alice: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestPatchChapter_MissingOrAmbiguousTarget(t *testing.T) {
 		t.Fatalf("expected ErrPatchNotFound, got: %v", err)
 	}
 
-	// 2. Ambiguous target text ("Bucket" appears multiple times)
+	// 2. Ambiguous target text ("MCP" appears multiple times)
 	_, err = eng.PatchChapter(ctx, &engine.PatchChapterInput{
 		Slug:          "02-agent-workflow",
 		OldText:       "MCP",
@@ -138,8 +138,8 @@ func TestPatchChapter_OptimisticRevisionConflict(t *testing.T) {
 
 	_, err := eng.PatchChapter(ctx, &engine.PatchChapterInput{
 		Slug:                "03-editorial-lineage",
-		OldText:             "Five Killer Product Features",
-		NewText:             "Five Institutional Product Features",
+		OldText:             "Core Publishing Features",
+		NewText:             "Core Studio Publishing Features",
 		CommitMessage:       "Test stale revision lock",
 		ExpectedRevisionSHA: "deadbee",
 	})
@@ -163,8 +163,8 @@ func TestCreateChapter_UpdatesSummaryMd(t *testing.T) {
 	createOut, err := eng.CreateChapter(ctx, &engine.CreateChapterInput{
 		Slug:            "05-security-model",
 		Title:           "Chapter 5: Security & Auth Model",
-		InitialMarkdown: "This chapter details Foreign Grantor Trust structuring and Korea-US treaty optimization for Dual-Nexus founders.",
-		CommitMessage:   "Create Chapter 5 on Korea-US tax treaty mechanics",
+		InitialMarkdown: "This chapter details SQLite WAL checkpointing and FTS5 tokenization tuning for multi-author books.",
+		CommitMessage:   "Create Chapter 5 on SQLite FTS5 indexing mechanics",
 	})
 	if err != nil {
 		t.Fatalf("create chapter: %v", err)
@@ -181,7 +181,7 @@ func TestCreateChapter_UpdatesSummaryMd(t *testing.T) {
 		t.Fatalf("expected SUMMARY.md to include new chapter link, got:\n%s", toc.SummaryMarkdown)
 	}
 
-	searchOut, err := eng.SearchBook(ctx, &engine.SearchBookInput{Query: "Grantor"})
+	searchOut, err := eng.SearchBook(ctx, &engine.SearchBookInput{Query: "checkpointer"})
 	if err != nil {
 		t.Fatalf("search newly created chapter: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestInlineMarkdownCallouts_And_RegressionGuards(t *testing.T) {
 	_, err := eng.PatchChapter(ctxAlice, &engine.PatchChapterInput{
 		Slug:          "02-agent-workflow",
 		OldText:       "## 1. Surgical Patching",
-		NewText:       "## 1. Surgical Patching\n\n> **[Comment · Alice Chen · 2026-11-18]:** Add a 200 bps SOFR stress row here.",
+		NewText:       "## 1. Surgical Patching\n\n> **[Comment · Alice Chen · 2026-11-18]:** Verify p99 snapshot rebuild latency here.",
 		CommitMessage: "Add inline comment callout in chapter 2",
 	})
 	if err != nil {
@@ -252,33 +252,33 @@ func TestInlineMarkdownCallouts_And_RegressionGuards(t *testing.T) {
 
 	// Prefix-sharing slug rename must NOT corrupt longer sibling links or /rev/ permalinks
 	if _, err := eng.CreateChapter(ctxAlice, &engine.CreateChapterInput{
-		Slug:            "01-mfo",
+		Slug:            "01-arch",
 		Title:           "Chapter 1A: Short Prefix",
 		InitialMarkdown: "# Chapter 1A: Short Prefix\n\nBody.\n",
 	}); err != nil {
-		t.Fatalf("CreateChapter 01-mfo: %v", err)
+		t.Fatalf("CreateChapter 01-arch: %v", err)
 	}
 	if _, err := eng.PatchChapter(ctxAlice, &engine.PatchChapterInput{
 		Slug:          "04-deployment-ops",
 		OldText:       "## 2. Remote Git Sync",
-		NewText:       "## 2. Remote Git Sync\n\nSee [Short](/chapters/01-mfo), [Long](/chapters/01-system-architecture), and [Pinned](/chapters/01-mfo/rev/r1).",
+		NewText:       "## 2. Remote Git Sync\n\nSee [Short](/chapters/01-arch), [Long](/chapters/01-system-architecture), and [Pinned](/chapters/01-arch/rev/r1).",
 		CommitMessage: "Add cross-chapter prefix links",
 	}); err != nil {
 		t.Fatalf("PatchChapter cross-links: %v", err)
 	}
 	if _, err := eng.RenameChapter(ctxAlice, &engine.RenameChapterInput{
-		OldSlug: "01-mfo",
-		NewSlug: "01-family-office",
+		OldSlug: "01-arch",
+		NewSlug: "01-storage-overview",
 	}); err != nil {
-		t.Fatalf("RenameChapter 01-mfo -> 01-family-office: %v", err)
+		t.Fatalf("RenameChapter 01-arch -> 01-storage-overview: %v", err)
 	}
 	ch4After, err := eng.ReadChapter(ctxAlice, &engine.ReadChapterInput{Slug: "04-deployment-ops"})
 	if err != nil {
 		t.Fatalf("ReadChapter ch4: %v", err)
 	}
-	if !strings.Contains(ch4After.ContentMarkdown, "(/chapters/01-family-office)") ||
+	if !strings.Contains(ch4After.ContentMarkdown, "(/chapters/01-storage-overview)") ||
 		!strings.Contains(ch4After.ContentMarkdown, "(/chapters/01-system-architecture)") ||
-		!strings.Contains(ch4After.ContentMarkdown, "(/chapters/01-mfo/rev/r1)") {
+		!strings.Contains(ch4After.ContentMarkdown, "(/chapters/01-arch/rev/r1)") {
 		t.Fatalf("unexpected link rewrite result in ch4:\n%s", ch4After.ContentMarkdown)
 	}
 }
@@ -322,8 +322,8 @@ func TestGitBlameAndRevert_RoundTrip(t *testing.T) {
 	_, err = eng.PatchChapter(ctxCarol, &engine.PatchChapterInput{
 		Slug:          "04-deployment-ops",
 		OldText:       "# Chapter 4: Single-Binary Deployment",
-		NewText:       "# Chapter 4: Single-Binary Deployment (Phase 1 Wedge)",
-		CommitMessage: "Clarify Phase 1 Wedge in title",
+		NewText:       "# Chapter 4: Single-Binary Deployment (v1 Architecture)",
+		CommitMessage: "Clarify v1 Architecture in title",
 	})
 	if err != nil {
 		t.Fatalf("patch chapter: %v", err)
@@ -369,7 +369,7 @@ func TestSlugPathTraversalRejection(t *testing.T) {
 	maliciousSlugs := []string{
 		"../etc/passwd",
 		"../../secret",
-		"01-mfo/../../evil",
+		"01-arch/../../evil",
 		"/etc/hosts",
 		"UPPERCASE_SLUG",
 		"slug with spaces",
@@ -458,8 +458,8 @@ func TestCreateChapter_ParentSlugAndInitialBodyVariants(t *testing.T) {
 
 	// 1. Create sub-chapter with ParentSlug and empty InitialMarkdown
 	out1, err := eng.CreateChapter(ctx, &engine.CreateChapterInput{
-		Slug:       "02a-obpi-floor-math",
-		Title:      "Section 2A: OBPI Floor Calibration",
+		Slug:       "02a-bm25-scoring",
+		Title:      "Section 2A: BM25 Scoring Calibration",
 		ParentSlug: "02-agent-workflow",
 		AuthorName: "Alice Chen",
 	})
@@ -470,14 +470,14 @@ func TestCreateChapter_ParentSlugAndInitialBodyVariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTableOfContents: %v", err)
 	}
-	if !strings.Contains(toc.SummaryMarkdown, "  - [Section 2A: OBPI Floor Calibration](02a-obpi-floor-math.md)") {
+	if !strings.Contains(toc.SummaryMarkdown, "  - [Section 2A: BM25 Scoring Calibration](02a-bm25-scoring.md)") {
 		t.Fatalf("expected indented entry under parent in SUMMARY.md, got:\n%s", toc.SummaryMarkdown)
 	}
 
 	// 1b. Create a second sub-chapter under the same ParentSlug and verify ordering + PartTitle grouping
 	_, err = eng.CreateChapter(ctx, &engine.CreateChapterInput{
-		Slug:       "02b-tail-hedging",
-		Title:      "Section 2B: Tail Risk Hedging",
+		Slug:       "02b-optimistic-locks",
+		Title:      "Section 2B: Optimistic Revision Locks",
 		ParentSlug: "02-agent-workflow",
 		AuthorName: "Carol Park",
 	})
@@ -487,7 +487,7 @@ func TestCreateChapter_ParentSlugAndInitialBodyVariants(t *testing.T) {
 
 	// 1c. Create a chapter under an existing PartTitle and under a brand-new PartTitle
 	_, err = eng.CreateChapter(ctx, &engine.CreateChapterInput{
-		Slug:       "02c-bucket1-compounding",
+		Slug:       "02c-snapshot-caching",
 		Title:      "Chapter 2C: Snapshot Caching",
 		PartTitle:  "Part I",
 		AuthorName: "Bob Rivera",
@@ -496,9 +496,9 @@ func TestCreateChapter_ParentSlugAndInitialBodyVariants(t *testing.T) {
 		t.Fatalf("CreateChapter with existing PartTitle: %v", err)
 	}
 	_, err = eng.CreateChapter(ctx, &engine.CreateChapterInput{
-		Slug:       "08-custody-mpc-rail",
-		Title:      "Chapter 8: Institutional Custody & MPC Rail",
-		PartTitle:  "Part III — Custody, Execution & Governance",
+		Slug:       "08-remote-git-sync",
+		Title:      "Chapter 8: Remote Git Sync & Mirrors",
+		PartTitle:  "Part III: Sync, Operations & Telemetry",
 		AuthorName: "Bob Rivera",
 	})
 	if err != nil {
@@ -509,16 +509,16 @@ func TestCreateChapter_ParentSlugAndInitialBodyVariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTableOfContents after PartTitle: %v", err)
 	}
-	if !strings.Contains(tocAfterParts.SummaryMarkdown, "# Part III — Custody, Execution & Governance") {
+	if !strings.Contains(tocAfterParts.SummaryMarkdown, "# Part III: Sync, Operations & Telemetry") {
 		t.Fatalf("expected new Part III header in SUMMARY.md, got:\n%s", tocAfterParts.SummaryMarkdown)
 	}
 	foundSub := false
 	foundPart3 := false
 	for _, ch := range tocAfterParts.Chapters {
-		if ch.Slug == "02b-tail-hedging" && ch.Depth == 1 && ch.ParentSlug == "02-agent-workflow" && ch.NumberLabel == "2.2" {
+		if ch.Slug == "02b-optimistic-locks" && ch.Depth == 1 && ch.ParentSlug == "02-agent-workflow" && ch.NumberLabel == "2.2" {
 			foundSub = true
 		}
-		if ch.Slug == "08-custody-mpc-rail" && ch.PartTitle == "Part III — Custody, Execution & Governance" && ch.Depth == 0 {
+		if ch.Slug == "08-remote-git-sync" && ch.PartTitle == "Part III: Sync, Operations & Telemetry" && ch.Depth == 0 {
 			foundPart3 = true
 		}
 	}
@@ -666,7 +666,7 @@ func TestChapterPermalinkLineage_OutdatedRenamedMovedDeletedAndRestored(t *testi
 	// 3. In-place title rename (same slug, new H1 title) -> r1 permalink becomes "renamed"
 	renameTitleOut, err := eng.RenameChapter(ctxAlice, &engine.RenameChapterInput{
 		OldSlug:       "03-editorial-lineage",
-		NewTitle:      "Chapter 3: The Five Institutional Pillars of Ghostbook",
+		NewTitle:      "Chapter 3: Core Architecture Pillars of Ghostbook",
 		CommitMessage: "Rename chapter 3 H1 title in place",
 	})
 	if err != nil {
@@ -683,12 +683,12 @@ func TestChapterPermalinkLineage_OutdatedRenamedMovedDeletedAndRestored(t *testi
 		t.Fatalf("expected LifecycleStatus=renamed and MovedToTitle=%q, got %+v", renameTitleOut.NewTitle, r1AfterTitleRename)
 	}
 
-	// 4. Move/rename slug (03-editorial-lineage -> 03-five-institutional-pillars) -> old slug becomes "moved"
+	// 4. Move/rename slug (03-editorial-lineage -> 03-core-architecture-pillars) -> old slug becomes "moved"
 	moveSlugOut, err := eng.RenameChapter(ctxAlice, &engine.RenameChapterInput{
 		OldSlug:       "03-editorial-lineage",
-		NewSlug:       "03-five-institutional-pillars",
+		NewSlug:       "03-core-architecture-pillars",
 		NewTitle:      "Chapter 3: The Five Institutional Pillars",
-		CommitMessage: "Move chapter 3 slug to 03-five-institutional-pillars",
+		CommitMessage: "Move chapter 3 slug to 03-core-architecture-pillars",
 	})
 	if err != nil {
 		t.Fatalf("RenameChapter (slug move): %v", err)
@@ -701,8 +701,8 @@ func TestChapterPermalinkLineage_OutdatedRenamedMovedDeletedAndRestored(t *testi
 	if err != nil {
 		t.Fatalf("ReadChapter on moved old slug: %v", err)
 	}
-	if oldSlugRead.LifecycleStatus != "moved" || oldSlugRead.MovedToSlug != "03-five-institutional-pillars" {
-		t.Fatalf("expected moved status pointing to 03-five-institutional-pillars, got %+v", oldSlugRead)
+	if oldSlugRead.LifecycleStatus != "moved" || oldSlugRead.MovedToSlug != "03-core-architecture-pillars" {
+		t.Fatalf("expected moved status pointing to 03-core-architecture-pillars, got %+v", oldSlugRead)
 	}
 	if oldSlugRead.LifecycleCommitSHA != moveSlugOut.NewRevisionSHA {
 		t.Fatalf("expected LifecycleCommitSHA=%s, got %s", moveSlugOut.NewRevisionSHA, oldSlugRead.LifecycleCommitSHA)
@@ -710,7 +710,7 @@ func TestChapterPermalinkLineage_OutdatedRenamedMovedDeletedAndRestored(t *testi
 
 	// 5. Delete chapter with replaced_by_slug -> becomes "deleted"
 	delOut, err := eng.DeleteChapter(ctxAlice, &engine.DeleteChapterInput{
-		Slug:           "03-five-institutional-pillars",
+		Slug:           "03-core-architecture-pillars",
 		Reason:         "Consolidated into Chapter 2",
 		ReplacedBySlug: "02-agent-workflow",
 	})
@@ -722,7 +722,7 @@ func TestChapterPermalinkLineage_OutdatedRenamedMovedDeletedAndRestored(t *testi
 	}
 
 	deletedRead, err := eng.ReadChapter(ctxAlice, &engine.ReadChapterInput{
-		Slug: "03-five-institutional-pillars",
+		Slug: "03-core-architecture-pillars",
 	})
 	if err != nil {
 		t.Fatalf("ReadChapter on deleted slug: %v", err)
@@ -733,7 +733,7 @@ func TestChapterPermalinkLineage_OutdatedRenamedMovedDeletedAndRestored(t *testi
 
 	// 6. Restore the deleted chapter via RevertChapterRevision using its pre-delete revision SHA
 	_, err = eng.RevertChapterRevision(ctxAlice, &engine.RevertChapterRevisionInput{
-		Slug:            "03-five-institutional-pillars",
+		Slug:            "03-core-architecture-pillars",
 		TargetCommitSHA: moveSlugOut.NewRevisionSHA,
 		Reason:          "Restore deleted chapter back to active book",
 	})
@@ -741,7 +741,7 @@ func TestChapterPermalinkLineage_OutdatedRenamedMovedDeletedAndRestored(t *testi
 		t.Fatalf("RevertChapterRevision on deleted chapter: %v", err)
 	}
 	restoredRead, err := eng.ReadChapter(ctxAlice, &engine.ReadChapterInput{
-		Slug: "03-five-institutional-pillars",
+		Slug: "03-core-architecture-pillars",
 	})
 	if err != nil || !restoredRead.IsLatest || restoredRead.LifecycleStatus != "current" {
 		t.Fatalf("expected restored chapter to be active and current, got %+v (err=%v)", restoredRead, err)
@@ -830,7 +830,7 @@ func TestRT04_OptimisticRevisionNumberLocking_And_FullChapterPatch(t *testing.T)
 	fullOut, err := eng.PatchChapter(ctx, &engine.PatchChapterInput{
 		Slug:                "01-system-architecture",
 		OldText:             "*",
-		NewText:             "# Chapter 1: MFO Stack Teardown (Full Studio Edit)\n\nReplaced full chapter body cleanly via Studio Full-Markdown Editor.",
+		NewText:             "# Chapter 1: System Architecture (Full Studio Edit)\n\nReplaced full chapter body cleanly via Studio Full-Markdown Editor.",
 		CommitMessage:       "Full chapter replacement at r2",
 		ExpectedRevisionSHA: "r2",
 	})
@@ -932,11 +932,11 @@ func TestLineageAndSummaryEdgeCases_TildeFences_And_CrossChapterLinks(t *testing
 		t.Fatalf("expected 2 blame sections (ignoring # inside ~~~ fence), got %+v (err=%v)", blame, err)
 	}
 
-	// 2. Rename 04-deployment-ops -> 04-lockin-playbook and verify cross-chapter link rewriting in 08-tilde-fence-test
+	// 2. Rename 04-deployment-ops -> 04-deployment-playbook and verify cross-chapter link rewriting in 08-tilde-fence-test
 	if _, err := eng.RenameChapter(ctx, &engine.RenameChapterInput{
 		OldSlug:  "04-deployment-ops",
-		NewSlug:  "04-lockin-playbook",
-		NewTitle: "Chapter 4: The Tool-First Lock-In Playbook",
+		NewSlug:  "04-deployment-playbook",
+		NewTitle: "Chapter 4: The Single-Binary Deployment Playbook",
 	}); err != nil {
 		t.Fatalf("RenameChapter 04: %v", err)
 	}
@@ -945,10 +945,10 @@ func TestLineageAndSummaryEdgeCases_TildeFences_And_CrossChapterLinks(t *testing
 	if err != nil {
 		t.Fatalf("ReadChapter 08: %v", err)
 	}
-	if !strings.Contains(ch8.ContentMarkdown, "(04-lockin-playbook.md)") ||
-		!strings.Contains(ch8.ContentMarkdown, "(./04-lockin-playbook.md)") ||
-		!strings.Contains(ch8.ContentMarkdown, "/chapters/04-lockin-playbook") {
-		t.Fatalf("expected cross-chapter links to be rewritten to 04-lockin-playbook, got:\n%s", ch8.ContentMarkdown)
+	if !strings.Contains(ch8.ContentMarkdown, "(04-deployment-playbook.md)") ||
+		!strings.Contains(ch8.ContentMarkdown, "(./04-deployment-playbook.md)") ||
+		!strings.Contains(ch8.ContentMarkdown, "/chapters/04-deployment-playbook") {
+		t.Fatalf("expected cross-chapter links to be rewritten to 04-deployment-playbook, got:\n%s", ch8.ContentMarkdown)
 	}
 
 	// 3. GetCommitDiff between r1 and HEAD
@@ -963,13 +963,13 @@ func TestLineageAndSummaryEdgeCases_TildeFences_And_CrossChapterLinks(t *testing
 
 	// 4. Error branches for RenameChapter, DeleteChapter, RevertChapterRevision, GetCommitDiff
 	if _, err := eng.RenameChapter(ctx, &engine.RenameChapterInput{
-		OldSlug: "04-lockin-playbook",
+		OldSlug: "04-deployment-playbook",
 		NewSlug: "01-system-architecture",
 	}); !errors.Is(err, engine.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument when renaming to existing chapter slug, got %v", err)
 	}
 	if _, err := eng.RenameChapter(ctx, &engine.RenameChapterInput{
-		OldSlug: "04-lockin-playbook",
+		OldSlug: "04-deployment-playbook",
 	}); !errors.Is(err, engine.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument when neither new_slug nor new_title is provided, got %v", err)
 	}

@@ -37,7 +37,7 @@ func cleanDiscoveryBaseURL(raw string) string {
 		return "http://127.0.0.1:8090"
 	}
 	if u, err := url.Parse(b); err == nil && u.Scheme != "" && u.Host != "" {
-		return u.Scheme + "://" + u.Host
+		return u.Scheme + "://" + u.Host + strings.TrimRight(u.Path, "/")
 	}
 	return b
 }

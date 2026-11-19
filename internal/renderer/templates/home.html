@@ -31,11 +31,11 @@
 
       <div class="provenance-banner" id="homeProvenanceBanner">
         <div class="provenance-meta">
-          <a href="/rev/{{.Book.HeadCommitSHA}}" class="rev-link" title="Open snapshot at HEAD revision r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})">
-            <span class="rev-pill">r{{.Book.HeadRevisionNumber}}</span>
+          <a href="/rev/{{.Book.HeadCommitSHA}}" class="rev-link" title="Open snapshot at HEAD revision {{if gt .Book.HeadRevisionNumber 0}}r{{.Book.HeadRevisionNumber}} {{end}}({{.Book.HeadCommitSHA}})">
+            {{if gt .Book.HeadRevisionNumber 0}}<span class="rev-pill">r{{.Book.HeadRevisionNumber}}</span>{{end}}
             <span class="rev-pill">{{.Book.HeadCommitSHA}}</span>
           </a>
-          <span>· {{len .Book.Chapters}} chapters</span>
+          <span>· {{len .Book.Chapters}} {{if eq (len .Book.Chapters) 1}}chapter{{else}}chapters{{end}}</span>
           <span>· {{.TotalWords}} words</span>
           <span>· {{len .Book.TimelineEntries}} {{if eq (len .Book.TimelineEntries) 1}}milestone{{else}}milestones{{end}}</span>
         </div>

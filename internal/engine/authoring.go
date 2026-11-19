@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,19 +15,29 @@ import (
 
 var headingPrefixLintRe = regexp.MustCompile(`(?i)^(?:(?:chapter|section|appendix)\s+[a-z0-9]+(?:\.[a-z0-9]+)*\s*[:.\-—]\s*|(?:introduction|preface|foreword|prologue|epilogue)\s*:\s*|\d+(?:\.\d+)*\s*[:.\-—]\s*)`)
 
+func isMarkdownH1ToH3Line(trimmed string) bool {
+	return strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ")
+}
+
 // LintChapterMarkdown performs non-blocking editorial checks against STYLE_GUIDE.md:
 // - Rule 1: Headings (H1/H2/H3) should be concise (<= 42 characters after prefix).
 // - Rule 5: Suppress em dashes (—) in narrative prose.
-// - Optional Rule 6: Flag any configured banned words.
+// - Optional Rule 6: Flag any configured banned words (matched on word boundaries).
 func LintChapterMarkdown(slug, md string, bannedWordsOpt ...[]string) []string {
 	if strings.EqualFold(slug, "STYLE_GUIDE") || strings.EqualFold(slug, "SUMMARY") {
 		return nil
 	}
-	var bannedWords []string
+	type bannedPattern struct {
+		word string
+		re   *regexp.Regexp
+	}
+	var banned []bannedPattern
 	if len(bannedWordsOpt) > 0 {
 		for _, w := range bannedWordsOpt[0] {
 			if clean := strings.ToLower(strings.TrimSpace(w)); clean != "" {
-				bannedWords = append(bannedWords, clean)
+				if re, err := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(clean) + `\b`); err == nil {
+					banned = append(banned, bannedPattern{word: clean, re: re})
+				}
 			}
 		}
 	}
@@ -44,17 +55,17 @@ func LintChapterMarkdown(slug, md string, bannedWordsOpt ...[]string) []string {
 		if inFence || trimmed == "" {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "#") {
+		if isMarkdownH1ToH3Line(trimmed) {
 			rawTitle := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
 			coreTitle := strings.TrimSpace(headingPrefixLintRe.ReplaceAllString(rawTitle, ""))
 			if utf8.RuneCountInString(coreTitle) > 42 {
 				warnings = append(warnings, fmt.Sprintf("Rule 1 (Concise Headings <= 42 chars): heading %q is %d chars after prefix", rawTitle, utf8.RuneCountInString(coreTitle)))
 			}
 		}
-		for _, bw := range bannedWords {
-			if !bannedReported[bw] && strings.Contains(strings.ToLower(trimmed), bw) {
-				bannedReported[bw] = true
-				warnings = append(warnings, fmt.Sprintf("Rule 6 (Terminology): avoid the configured banned term %q", bw))
+		for _, bp := range banned {
+			if !bannedReported[bp.word] && bp.re.MatchString(trimmed) {
+				bannedReported[bp.word] = true
+				warnings = append(warnings, fmt.Sprintf("Rule 6 (Terminology): avoid the configured banned term %q", bp.word))
 			}
 		}
 		if !emDashReported && !strings.HasPrefix(trimmed, "|") && strings.Contains(trimmed, "—") {
@@ -183,8 +194,7 @@ func (e *BookEngine) PatchChapter(ctx context.Context, in *PatchChapterInput) (*
 	defer e.mu.Unlock()
 
 	relPath := filepath.ToSlash(filepath.Join("src", slug+".md"))
-	fullPath := filepath.Join(e.repoDir, "src", slug+".md")
-	rawBytes, err := os.ReadFile(fullPath)
+	rawBytes, err := e.readSrcFileSafe(slug + ".md")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, slug)
@@ -211,7 +221,7 @@ func (e *BookEngine) PatchChapter(ctx context.Context, in *PatchChapterInput) (*
 	if updatedContent == currentContent {
 		return nil, fmt.Errorf("%w: patch produced no changes in %s", ErrInvalidArgument, slug)
 	}
-	if err := os.WriteFile(fullPath, []byte(updatedContent), 0o644); err != nil {
+	if err := e.writeSrcFileSafe(slug+".md", []byte(updatedContent)); err != nil {
 		return nil, err
 	}
 
@@ -220,11 +230,10 @@ func (e *BookEngine) PatchChapter(ctx context.Context, in *PatchChapterInput) (*
 		oldH1 := extractMarkdownH1(currentContent)
 		newH1 := extractMarkdownH1(updatedContent)
 		if newH1 != "" && newH1 != oldH1 {
-			summaryFull := filepath.Join(e.repoDir, "src", "SUMMARY.md")
-			if rawSummary, sumErr := os.ReadFile(summaryFull); sumErr == nil {
+			if rawSummary, sumErr := e.readSrcFileSafe("SUMMARY.md"); sumErr == nil {
 				updatedSummary := rewriteSummaryForRename(string(rawSummary), slug, slug, newH1)
 				if updatedSummary != string(rawSummary) {
-					if err := os.WriteFile(summaryFull, []byte(updatedSummary), 0o644); err != nil {
+					if err := e.writeSrcFileSafe("SUMMARY.md", []byte(updatedSummary)); err != nil {
 						e.resetWorktreeLocked()
 						return nil, err
 					}
@@ -286,15 +295,18 @@ func (e *BookEngine) CreateChapter(ctx context.Context, in *CreateChapterInput) 
 	if _, err := os.Stat(fullChapter); err == nil {
 		return nil, fmt.Errorf("%w: chapter %s already exists", ErrInvalidArgument, slug)
 	}
-	if err := os.WriteFile(fullChapter, []byte(body), 0o644); err != nil {
+	if err := e.writeSrcFileSafe(slug+".md", []byte(body)); err != nil {
 		return nil, err
 	}
 
-	summaryFull := filepath.Join(e.repoDir, "src", "SUMMARY.md")
-	rawSummary, _ := os.ReadFile(summaryFull)
+	rawSummary, sumReadErr := e.readSrcFileSafe("SUMMARY.md")
+	if sumReadErr != nil && !errors.Is(sumReadErr, os.ErrNotExist) {
+		e.resetWorktreeLocked(fullChapter)
+		return nil, fmt.Errorf("read SUMMARY.md: %w", sumReadErr)
+	}
 	updatedSummary := insertSummaryEntry(string(rawSummary), title, slug, in.ParentSlug, in.PartTitle)
 	if updatedSummary != string(rawSummary) {
-		if err := os.WriteFile(summaryFull, []byte(updatedSummary), 0o644); err != nil {
+		if err := e.writeSrcFileSafe("SUMMARY.md", []byte(updatedSummary)); err != nil {
 			e.resetWorktreeLocked(fullChapter)
 			return nil, err
 		}
@@ -364,23 +376,22 @@ func (e *BookEngine) RevertChapterRevision(ctx context.Context, in *RevertChapte
 
 	fullPath := filepath.Join(e.repoDir, "src", slug+".md")
 	_, existedBefore := os.Stat(fullPath)
-	if currentBytes, readErr := os.ReadFile(fullPath); readErr == nil && string(currentBytes) == historicalContent {
+	if currentBytes, readErr := e.readSrcFileSafe(slug + ".md"); readErr == nil && string(currentBytes) == historicalContent {
 		return nil, fmt.Errorf("%w: chapter %s is already identical to revision %s", ErrInvalidArgument, slug, shortSHA(targetCommit.Hash.String()))
 	}
-	if err := os.WriteFile(fullPath, []byte(historicalContent), 0o644); err != nil {
+	if err := e.writeSrcFileSafe(slug+".md", []byte(historicalContent)); err != nil {
 		return nil, err
 	}
 
 	commitPaths := []string{relPath}
-	summaryFull := filepath.Join(e.repoDir, "src", "SUMMARY.md")
-	if rawSummary, sumErr := os.ReadFile(summaryFull); sumErr == nil {
+	if rawSummary, sumErr := e.readSrcFileSafe("SUMMARY.md"); sumErr == nil {
 		restoredTitle := extractMarkdownH1(historicalContent)
 		if restoredTitle == "" {
 			restoredTitle = slug
 		}
-		updatedSummary := insertSummaryEntry(string(rawSummary), restoredTitle, slug, "", "")
+		updatedSummary := rewriteSummaryForRename(string(rawSummary), slug, slug, restoredTitle)
 		if updatedSummary != string(rawSummary) {
-			if err := os.WriteFile(summaryFull, []byte(updatedSummary), 0o644); err != nil {
+			if err := e.writeSrcFileSafe("SUMMARY.md", []byte(updatedSummary)); err != nil {
 				if os.IsNotExist(existedBefore) {
 					e.resetWorktreeLocked(fullPath)
 				} else {
@@ -450,7 +461,7 @@ func validateRenameChapterInput(in *RenameChapterInput) (string, string, string,
 func (e *BookEngine) applyChapterRenameFilesLocked(oldSlug, newSlug, newTitle string) (string, []string, []string, error) {
 	oldRel := filepath.ToSlash(filepath.Join("src", oldSlug+".md"))
 	oldFull := filepath.Join(e.repoDir, "src", oldSlug+".md")
-	rawBytes, err := os.ReadFile(oldFull)
+	rawBytes, err := e.readSrcFileSafe(oldSlug + ".md")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil, nil, fmt.Errorf("%w: %s", ErrNotFound, oldSlug)
@@ -467,7 +478,11 @@ func (e *BookEngine) applyChapterRenameFilesLocked(oldSlug, newSlug, newTitle st
 		}
 	}
 
-	effectiveTitle := extractMarkdownH1(mdContent)
+	existingH1 := extractMarkdownH1(mdContent)
+	if newSlug == oldSlug && newTitle != "" && newTitle == existingH1 {
+		return "", nil, nil, fmt.Errorf("%w: chapter %s already has title %q", ErrInvalidArgument, oldSlug, newTitle)
+	}
+	effectiveTitle := existingH1
 	if newTitle != "" {
 		mdContent = replaceFirstH1Heading(mdContent, newTitle)
 		effectiveTitle = newTitle
@@ -476,7 +491,7 @@ func (e *BookEngine) applyChapterRenameFilesLocked(oldSlug, newSlug, newTitle st
 		effectiveTitle = newSlug
 	}
 
-	if err := os.WriteFile(newFull, []byte(mdContent), 0o644); err != nil {
+	if err := e.writeSrcFileSafe(newSlug+".md", []byte(mdContent)); err != nil {
 		return "", nil, nil, err
 	}
 	var removePaths []string
@@ -489,11 +504,10 @@ func (e *BookEngine) applyChapterRenameFilesLocked(oldSlug, newSlug, newTitle st
 	}
 
 	addPaths := []string{newRel}
-	summaryFull := filepath.Join(e.repoDir, "src", "SUMMARY.md")
-	if rawSummary, sumErr := os.ReadFile(summaryFull); sumErr == nil {
+	if rawSummary, sumErr := e.readSrcFileSafe("SUMMARY.md"); sumErr == nil {
 		updatedSummary := rewriteSummaryForRename(string(rawSummary), oldSlug, newSlug, effectiveTitle)
 		if updatedSummary != string(rawSummary) {
-			if err := os.WriteFile(summaryFull, []byte(updatedSummary), 0o644); err != nil {
+			if err := e.writeSrcFileSafe("SUMMARY.md", []byte(updatedSummary)); err != nil {
 				if newSlug != oldSlug {
 					e.resetWorktreeLocked(newFull)
 				} else {

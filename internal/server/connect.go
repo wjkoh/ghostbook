@@ -37,7 +37,7 @@ func toConnectError(err error) error {
 	case errors.Is(err, engine.ErrPatchNotFound), errors.Is(err, engine.ErrPatchAmbiguous), errors.Is(err, engine.ErrRevisionConflict):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 	default:
-		return connect.NewError(connect.CodeInternal, err)
+		return connect.NewError(connect.CodeInternal, errors.New("internal server error"))
 	}
 }
 
@@ -252,10 +252,14 @@ func (a *ConnectAdapter) DeleteChapter(ctx context.Context, req *connect.Request
 		AuthorName:     req.Msg.GetAuthorName(),
 	})
 	var sha string
+	auditSlug := req.Msg.GetSlug()
 	if out != nil {
 		sha = out.NewRevisionSHA
+		if out.DeletedSlug != "" {
+			auditSlug = out.DeletedSlug
+		}
 	}
-	auditToolCall(ctx, a.eng, "connectrpc", "DeleteChapter", req.Msg.GetSlug(), sha, start, err)
+	auditToolCall(ctx, a.eng, "connectrpc", "DeleteChapter", auditSlug, sha, start, err)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

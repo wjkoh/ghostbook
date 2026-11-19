@@ -29,6 +29,12 @@ func TestRun_FlagErrorsAndInvalidListenAddr(t *testing.T) {
 		t.Fatalf("expected version subcommand output, got %q (err=%v)", buf.String(), err)
 	}
 
+	// --help must succeed cleanly with nil error
+	var helpBuf bytes.Buffer
+	if err := run(ctx, []string{"--help"}, &helpBuf); err != nil || !strings.Contains(helpBuf.String(), "Usage of ghostbook:") {
+		t.Fatalf("expected --help to return nil and print usage, got err=%v out=%q", err, helpBuf.String())
+	}
+
 	if err := run(ctx, []string{"-unknown-flag"}, io.Discard); err == nil {
 		t.Fatalf("expected error for unknown flag")
 	}
@@ -85,14 +91,18 @@ func TestRun_FlagErrorsAndInvalidListenAddr(t *testing.T) {
 
 func TestRun_AuthorsSubcommands(t *testing.T) {
 	ctx := context.Background()
-	dataDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "nonexistent-sub")
 
+	// authors list on nonexistent dataDir must NOT create the directory or DB
 	var listEmpty bytes.Buffer
 	if err := run(ctx, []string{"authors", "list", "-data-dir", dataDir}, &listEmpty); err != nil {
 		t.Fatalf("authors list empty: %v", err)
 	}
 	if !strings.Contains(listEmpty.String(), "No co-authors configured.") {
 		t.Fatalf("unexpected empty authors list output: %q", listEmpty.String())
+	}
+	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+		t.Fatalf("expected authors list not to create missing dataDir %s", dataDir)
 	}
 
 	var addOut bytes.Buffer
@@ -134,6 +144,28 @@ func TestRun_AuthorsSubcommands(t *testing.T) {
 	}
 	if !strings.Contains(listOut.String(), "Alice Chen") || !strings.Contains(listOut.String(), "alice@example.com") {
 		t.Fatalf("expected alice in authors list output:\n%s", listOut.String())
+	}
+
+	// Revoke author and verify list reports none
+	var revokeOut bytes.Buffer
+	if err := run(ctx, []string{"authors", "revoke", "-data-dir", dataDir, "-id", "alice"}, &revokeOut); err != nil {
+		t.Fatalf("authors revoke: %v", err)
+	}
+	var listAfterRevoke bytes.Buffer
+	if err := run(ctx, []string{"authors", "list", "-data-dir", dataDir}, &listAfterRevoke); err != nil {
+		t.Fatalf("authors list after revoke: %v", err)
+	}
+	if !strings.Contains(listAfterRevoke.String(), "No co-authors configured.") {
+		t.Fatalf("expected revoked author hidden from list, got:\n%s", listAfterRevoke.String())
+	}
+
+	// Rotate key re-enables author with a fresh key
+	var rotateOut bytes.Buffer
+	if err := run(ctx, []string{"authors", "rotate-key", "-data-dir", dataDir, "-base-url", "https://docs.example.com", "-id", "alice"}, &rotateOut); err != nil {
+		t.Fatalf("authors rotate-key: %v", err)
+	}
+	if !strings.Contains(rotateOut.String(), "Rotated secret key for alice") || rotateOut.String() == addOut.String() {
+		t.Fatalf("unexpected rotate-key output:\n%s", rotateOut.String())
 	}
 }
 
@@ -289,16 +321,39 @@ func TestRun_StartServeRemoteSyncAndGracefulShutdown(t *testing.T) {
 		t.Fatalf("timed out waiting for graceful shutdown")
 	}
 
-	// Exercise main() with SIGTERM graceful shutdown
+	// Exercise main() with SIGTERM graceful shutdown after polling /healthz (never a blind sleep)
+	mainProbe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen main ephemeral: %v", err)
+	}
+	mainAddr := mainProbe.Addr().String()
+	_ = mainProbe.Close()
+
 	origArgs := os.Args
 	defer func() { os.Args = origArgs }()
-	os.Args = []string{"ghostbook", "-addr", "127.0.0.1:0", "-data-dir", t.TempDir(), "-send-invites=false"}
+	os.Args = []string{"ghostbook", "-addr", mainAddr, "-data-dir", t.TempDir(), "-send-invites=false"}
 	mainDone := make(chan struct{})
 	go func() {
 		main()
 		close(mainDone)
 	}()
-	time.Sleep(250 * time.Millisecond)
+	mainDeadline := time.Now().Add(5 * time.Second)
+	var mainReady bool
+	for time.Now().Before(mainDeadline) {
+		resp, reqErr := http.Get(fmt.Sprintf("http://%s/healthz", mainAddr))
+		if reqErr == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				mainReady = true
+				break
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if !mainReady {
+		t.Fatalf("main() server did not become healthy on %s", mainAddr)
+	}
 	_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 	select {
 	case <-mainDone:

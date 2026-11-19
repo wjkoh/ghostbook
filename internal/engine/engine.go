@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/wjkoh/ghostbook/internal/renderer"
 	"github.com/wjkoh/ghostbook/internal/store"
 )
@@ -79,19 +81,40 @@ type EngineConfig struct {
 }
 
 type BookEngine struct {
-	repoDir    string
-	baseURL    string
-	cfg        EngineConfig
-	repo       *git.Repository
-	store      *store.Store
-	alerter    atomic.Pointer[store.AlertNotifier]
-	briefSynth atomic.Pointer[BriefSynthesizer]
-	mu         sync.RWMutex
-	syncMu     sync.Mutex
-	briefMu    sync.Mutex
-	snapshot   atomic.Pointer[renderer.RenderedBook]
-	syncCh     chan struct{}
-	briefCh    chan struct{}
+	repoDir          string
+	baseURL          string
+	cfg              EngineConfig
+	repo             *git.Repository
+	store            *store.Store
+	alerter          atomic.Pointer[store.AlertNotifier]
+	briefSynth       atomic.Pointer[BriefSynthesizer]
+	mu               sync.RWMutex
+	syncMu           sync.Mutex
+	briefMu          sync.Mutex
+	snapshot         atomic.Pointer[renderer.RenderedBook]
+	commitFilesCache map[plumbing.Hash][]string
+	syncCh           chan struct{}
+	briefCh          chan struct{}
+}
+
+func sanitizeMCPName(raw string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	if trimmed == "" {
+		return "ghostbook"
+	}
+	var b strings.Builder
+	for _, r := range trimmed {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		} else if r == ' ' {
+			b.WriteRune('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-_")
+	if out == "" {
+		return "ghostbook"
+	}
+	return out
 }
 
 func NewBookEngine(repoDir string, st *store.Store, baseURL string, remoteURLOpt ...string) (*BookEngine, error) {
@@ -112,9 +135,8 @@ func NewBookEngineWithConfig(repoDir string, st *store.Store, baseURL string, cf
 	if strings.TrimSpace(cfg.BookKicker) == "" {
 		cfg.BookKicker = "Living Book"
 	}
-	if strings.TrimSpace(cfg.MCPName) == "" {
-		cfg.MCPName = "ghostbook"
-	}
+	cfg.MCPName = sanitizeMCPName(cfg.MCPName)
+	cfg.BannedWords = slices.Clone(cfg.BannedWords)
 	explicitRemote := ""
 	if len(remoteURLOpt) > 0 {
 		explicitRemote = strings.TrimSpace(remoteURLOpt[0])
@@ -125,13 +147,14 @@ func NewBookEngineWithConfig(repoDir string, st *store.Store, baseURL string, cf
 	}
 
 	eng := &BookEngine{
-		repoDir: repoDir,
-		baseURL: baseURL,
-		cfg:     cfg,
-		repo:    repo,
-		store:   st,
-		syncCh:  make(chan struct{}, 1),
-		briefCh: make(chan struct{}, 1),
+		repoDir:          repoDir,
+		baseURL:          baseURL,
+		cfg:              cfg,
+		repo:             repo,
+		store:            st,
+		commitFilesCache: make(map[plumbing.Hash][]string),
+		syncCh:           make(chan struct{}, 1),
+		briefCh:          make(chan struct{}, 1),
 	}
 
 	eng.mu.Lock()
@@ -141,6 +164,42 @@ func NewBookEngineWithConfig(repoDir string, st *store.Store, baseURL string, cf
 		return nil, err
 	}
 	return eng, nil
+}
+
+// readSrcFileSafe reads a regular file strictly inside <repoDir>/src using os.OpenRoot
+// and rejects symlinks to prevent arbitrary host file reads from malicious Git commits.
+func (e *BookEngine) readSrcFileSafe(name string) ([]byte, error) {
+	srcDir := filepath.Join(e.repoDir, "src")
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	fi, err := root.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %s is not a regular file", ErrInvalidArgument, name)
+	}
+	return root.ReadFile(name)
+}
+
+// writeSrcFileSafe writes a regular file strictly inside <repoDir>/src using os.OpenRoot,
+// rejecting symlinks so writes cannot escape the repository directory.
+func (e *BookEngine) writeSrcFileSafe(name string, data []byte) error {
+	srcDir := filepath.Join(e.repoDir, "src")
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	if fi, err := root.Lstat(name); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+			return fmt.Errorf("%w: %s is not a regular file", ErrInvalidArgument, name)
+		}
+	}
+	return root.WriteFile(name, data, 0o644)
 }
 
 func (e *BookEngine) BookTitle() string {
@@ -160,7 +219,7 @@ func (e *BookEngine) ExtraLLMsMarkdown() string {
 }
 
 func (e *BookEngine) BannedWords() []string {
-	return e.cfg.BannedWords
+	return slices.Clone(e.cfg.BannedWords)
 }
 
 func (e *BookEngine) Store() *store.Store {
@@ -191,7 +250,7 @@ func (e *BookEngine) CurrentSnapshot() *renderer.RenderedBook {
 
 func (e *BookEngine) StyleGuide() string {
 	e.mu.RLock()
-	diskBytes, err := os.ReadFile(filepath.Join(e.repoDir, "src", "STYLE_GUIDE.md"))
+	diskBytes, err := e.readSrcFileSafe("STYLE_GUIDE.md")
 	e.mu.RUnlock()
 	if err == nil && len(diskBytes) > 0 {
 		return strings.TrimSpace(string(diskBytes))
@@ -200,13 +259,15 @@ func (e *BookEngine) StyleGuide() string {
 }
 
 func (e *BookEngine) resolveEffectiveAuthor(ctx context.Context, override string) *store.Author {
+	// Authenticated caller identity always takes precedence over any untrusted author_name parameter
+	// so one co-author cannot spoof commits under another co-author's name.
+	if a := AuthorFromContext(ctx); a != nil {
+		return a
+	}
 	if strings.TrimSpace(override) != "" {
 		if a, err := e.store.ResolveAuthorName(ctx, override); err == nil {
 			return a
 		}
-	}
-	if a := AuthorFromContext(ctx); a != nil {
-		return a
 	}
 	if authors, err := e.store.ListAuthors(ctx); err == nil && len(authors) > 0 {
 		return &authors[0]
@@ -451,7 +512,7 @@ func (e *BookEngine) SearchBook(ctx context.Context, in *SearchBookInput) (*Sear
 	if in == nil || strings.TrimSpace(in.Query) == "" {
 		return &SearchBookOutput{}, nil
 	}
-	filterSlug := strings.TrimSpace(strings.TrimSuffix(in.Slug, ".md"))
+	filterSlug := strings.TrimSuffix(strings.TrimSpace(in.Slug), ".md")
 	limit := int(in.Limit)
 	if limit <= 0 {
 		limit = 10
@@ -493,7 +554,7 @@ func (e *BookEngine) SearchBook(ctx context.Context, in *SearchBookInput) (*Sear
 	}
 
 	// Fallback / supplement: scan chapter Markdown directly so punctuation-heavy queries
-	// (e.g. "$2.8B", "99.43%", "[TODO") or single-chapter finds always return exact line matches.
+	// (e.g. "p99 < 2ms", "r12", "[TODO") or single-chapter finds always return exact line matches.
 	if snap != nil && len(matches) < limit {
 		for _, ch := range snap.Chapters {
 			if seen[ch.Slug] {

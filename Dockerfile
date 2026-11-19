@@ -6,11 +6,13 @@ RUN go mod download
 
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/ghostbook ./cmd/ghostbook
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/ghostbook ./cmd/ghostbook \
+  && mkdir -p /out/data && chmod 0700 /out/data
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=builder /out/ghostbook /usr/local/bin/ghostbook
+COPY --from=builder --chown=65532:65532 /out/data /data
 VOLUME ["/data"]
 EXPOSE 8090
 

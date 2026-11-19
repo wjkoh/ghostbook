@@ -11,17 +11,28 @@ jobs:
   close-external-pr:
     if: github.actor != github.repository_owner
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Close external pull request
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            await github.rest.issues.createComment({
+            const marker = "read-only open-source release under the Apache 2.0 license";
+            const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: "Thank you for your interest in Ghostbook. This repository is published as a read-only open-source release under the Apache 2.0 license and does not accept external pull requests. Please feel free to fork the repository for your own modifications."
+              per_page: 20,
             });
+            const alreadyPosted = comments.data.some((c) => c.body && c.body.includes(marker));
+            if (!alreadyPosted) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: "Thank you for your interest in Ghostbook. This repository is published as a read-only open-source release under the Apache 2.0 license and does not accept external pull requests. Please feel free to fork the repository for your own modifications."
+              });
+            }
             await github.rest.pulls.update({
               owner: context.repo.owner,
               repo: context.repo.repo,

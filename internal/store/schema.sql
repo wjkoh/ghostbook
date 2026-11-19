@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS authors (
     display_name      TEXT NOT NULL,             -- e.g. "Alice Chen"
     git_email         TEXT NOT NULL UNIQUE,      -- e.g. "alice@example.com"
     role_badge        TEXT NOT NULL DEFAULT 'Co-Author',
-    secret_key        TEXT NOT NULL DEFAULT '',  -- Per-author random secret key for /u/<email>:<secret-key>/...
+    secret_key        TEXT NOT NULL DEFAULT '',  -- Per-author random secret key for /u/{email}:{secret-key}/...
+    revoked           INTEGER NOT NULL DEFAULT 0, -- 1 when author credentials have been revoked
     invite_sent_at    TEXT NOT NULL DEFAULT '',  -- RFC3339 timestamp when onboarding email was sent via Resend
     invite_message_id TEXT NOT NULL DEFAULT '',  -- Resend message ID for audit/idempotency
     created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
@@ -34,7 +35,7 @@ CREATE TABLE IF NOT EXISTS agent_audit_log (
     timestamp_iso   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     author_id       TEXT NOT NULL,
     protocol        TEXT NOT NULL,             -- "mcp" or "connectrpc"
-    user_agent      TEXT NOT NULL,             -- Distinguishes Claude, ChatGPT, and Antigravity CLI
+    user_agent      TEXT NOT NULL,             -- Distinguishes Claude, ChatGPT, Gemini, Cursor, and CLI agents
     tool_name       TEXT NOT NULL,             -- e.g. "read_chapter", "patch_chapter"
     chapter_slug    TEXT NOT NULL DEFAULT '',
     git_commit_sha  TEXT NOT NULL DEFAULT '',  -- Resulting commit SHA if write succeeded

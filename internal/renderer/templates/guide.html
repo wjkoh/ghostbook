@@ -36,7 +36,7 @@
 
         {{if .Book.Authors}}
         <div class="guide-profile-bar" role="group" aria-label="Select Your Co-Author Profile">
-          <div class="guide-profile-label">1. Select Your Co-Author Profile (or open your personalized setup link to auto-fill <code>&lt;secret-key&gt;</code>):</div>
+          <div class="guide-profile-label">Select Your Co-Author Profile (or open your personalized setup link to auto-fill <code>&lt;secret-key&gt;</code>):</div>
           <div class="guide-profile-pills">
             {{range $i, $a := .Book.Authors}}
             <button class="profile-pill-btn{{if eq $i 0}} active{{end}}" data-author-id="{{$a.ID}}" data-author-email="{{$a.Email}}" data-author-name="{{$a.DisplayName}}" onclick="selectGuideProfile(this.dataset.authorEmail, this.dataset.authorName, null, this.dataset.authorId)">{{$a.DisplayName}}</button>

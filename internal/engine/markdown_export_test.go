@@ -27,10 +27,10 @@ func TestSuiteA_MarkdownExportEngine_UT_MD_ENG_01_to_08(t *testing.T) {
 
 		// Add a nested sub-chapter under 01-system-architecture to verify hierarchical indentation
 		if _, err := eng.CreateChapter(ctx, &engine.CreateChapterInput{
-			Slug:            "01a-fee-compression",
-			Title:           "1.1 Fee Compression Mechanics",
+			Slug:            "01a-wal-tuning",
+			Title:           "1.1 WAL Checkpointing Mechanics",
 			ParentSlug:      "01-system-architecture",
-			InitialMarkdown: "# 1.1 Fee Compression Mechanics\n\nDetailed MFO fee stack breakdown.\n",
+			InitialMarkdown: "# 1.1 WAL Checkpointing Mechanics\n\nDetailed SQLite WAL checkpoint breakdown.\n",
 			CommitMessage:   "Add sub-chapter 1.1",
 		}); err != nil {
 			t.Fatalf("CreateChapter sub-chapter: %v", err)
@@ -46,13 +46,13 @@ func TestSuiteA_MarkdownExportEngine_UT_MD_ENG_01_to_08(t *testing.T) {
 		assertZeroHTMLChrome(t, "llms.txt HEAD", res.Markdown)
 
 		for _, mustContain := range []string{
-			"# Ghostbook\n\n> Canonical Git-backed living book (Living Book).",
+			"# Ghostbook\n\n> Canonical Git-backed living book.",
 			"## Whole-Book Raw Markdown (Single-Request Ingest)",
 			"https://docs.example.com/llms-full.txt",
 			"https://docs.example.com/book.md",
 			"## Table of Contents (Per-Chapter Raw Markdown)",
 			"https://docs.example.com/chapters/01-system-architecture.md",
-			"  - [1.1 Fee Compression Mechanics](https://docs.example.com/chapters/01a-fee-compression.md)",
+			"  - [1.1 WAL Checkpointing Mechanics](https://docs.example.com/chapters/01a-wal-tuning.md)",
 			"## Meta Documents & Agent Protocols",
 			"https://docs.example.com/SUMMARY.md",
 			"https://docs.example.com/STYLE_GUIDE.md",
@@ -157,7 +157,7 @@ func TestSuiteA_MarkdownExportEngine_UT_MD_ENG_01_to_08(t *testing.T) {
 		if _, err := eng.PatchChapter(ctx, &engine.PatchChapterInput{
 			Slug:          "01-system-architecture",
 			OldText:       "Ghostbook bundles pure-Go",
-			NewText:       "pure-Go Git MFO Platform",
+			NewText:       "pure-Go Git Book Platform",
 			CommitMessage: "Update pure-Go Git phrasing",
 		}); err != nil {
 			t.Fatalf("PatchChapter: %v", err)
@@ -182,7 +182,7 @@ func TestSuiteA_MarkdownExportEngine_UT_MD_ENG_01_to_08(t *testing.T) {
 		if r1After.IsLatest || r1After.RevisionNumber != 1 {
 			t.Fatalf("expected historical r1 metadata, got %+v", r1After)
 		}
-		if !strings.Contains(r1After.Markdown, "Ghostbook bundles pure-Go") || strings.Contains(r1After.Markdown, "pure-Go Git MFO Platform") {
+		if !strings.Contains(r1After.Markdown, "Ghostbook bundles pure-Go") || strings.Contains(r1After.Markdown, "pure-Go Git Book Platform") {
 			t.Fatalf("historical r1 book did not preserve exact r1 Chapter 1 text")
 		}
 		if !strings.Contains(r1After.Markdown, "**Chapter Slug:** 02-agent-workflow") || r1After.WordCount != r1Book.WordCount {
@@ -195,7 +195,7 @@ func TestSuiteA_MarkdownExportEngine_UT_MD_ENG_01_to_08(t *testing.T) {
 		if _, err := eng.PatchChapter(ctx, &engine.PatchChapterInput{
 			Slug:          "01-system-architecture",
 			OldText:       "Ghostbook bundles pure-Go",
-			NewText:       "Ghostbook bundles pure-Go LLC",
+			NewText:       "Ghostbook bundles pure-Go Studio",
 			CommitMessage: "Clarify entity suffix | test pipe escaping",
 		}); err != nil {
 			t.Fatalf("PatchChapter: %v", err)

@@ -58,7 +58,7 @@ func TestTimelineSemanticClusteringInterleavingAndCallouts_UT_TL_02(t *testing.T
 				"content": {
 					"parts": [
 						{"thought": true, "text": "Clustering interleaved revisions 2 and 4 separately from 3..."},
-						{"text": "{\"milestones\":[{\"revisions\":[2,4,999],\"title\":\"pure-Go Git Stack & Fee Schedule:\",\"summary\":\"Added $4.2B AUM figure — replacing legacy framing with institutional credit sleeves.\",\"chapter_slugs\":[\"01-system-architecture\",\"99-hallucinated\"],\"authors\":[\"Bob Rivera\"]},{\"revisions\":[3],\"title\":\"Tool-First Onboarding Sequence\",\"summary\":\"Clarified zero-migration portfolio ingestion steps before balance-sheet buyout.\",\"chapter_slugs\":[],\"authors\":[]}]}"}
+						{"text": "{\"milestones\":[{\"revisions\":[2,4,999],\"title\":\"pure-Go Git Stack & Storage Benchmark:\",\"summary\":\"Added 42ms p99 rebuild figure — replacing legacy framing with multi-author editing sessions.\",\"chapter_slugs\":[\"01-system-architecture\",\"99-hallucinated\"],\"authors\":[\"Bob Rivera\"]},{\"revisions\":[3],\"title\":\"Zero-Downtime Upgrade Sequence\",\"summary\":\"Clarified idle-window binary promotion steps with health-check rollback.\",\"chapter_slugs\":[],\"authors\":[]}]}"}
 					]
 				}
 			}]
@@ -77,8 +77,8 @@ func TestTimelineSemanticClusteringInterleavingAndCallouts_UT_TL_02(t *testing.T
 	if _, err := eng.PatchChapter(ctx, &engine.PatchChapterInput{
 		Slug:          "01-system-architecture",
 		OldText:       "Ghostbook bundles pure-Go",
-		NewText:       "Ghostbook bundles pure-Go ($4.2B AUM)",
-		CommitMessage: "Add pure-Go Git AUM",
+		NewText:       "Ghostbook bundles pure-Go (42ms p99 rebuild)",
+		CommitMessage: "Add pure-Go Git benchmark",
 	}); err != nil {
 		t.Fatalf("patch r2: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestTimelineSemanticClusteringInterleavingAndCallouts_UT_TL_02(t *testing.T
 		AuthorName:    "carol",
 		OldText:       "debounced push to a private Git remote",
 		NewText:       "debounced push to a private Git remote with retry",
-		CommitMessage: "Clarify ch4 overlay step",
+		CommitMessage: "Clarify ch4 upgrade step",
 	}); err != nil {
 		t.Fatalf("patch r3: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestTimelineSemanticClusteringInterleavingAndCallouts_UT_TL_02(t *testing.T
 	if top.StartRevision != 2 || top.EndRevision != 4 || top.CommitCount != 2 {
 		t.Fatalf("expected interleaved [2,4] milestone with count=2, got %+v", top)
 	}
-	if top.Title != "pure-Go Git Stack & Fee Schedule" || strings.Contains(top.Summary, "—") {
+	if top.Title != "pure-Go Git Stack & Storage Benchmark" || strings.Contains(top.Summary, "—") {
 		t.Fatalf("expected sanitized title & summary, got title=%q summary=%q", top.Title, top.Summary)
 	}
 	if len(top.ChapterSlugs) != 1 || top.ChapterSlugs[0] != "01-system-architecture" {
@@ -188,7 +188,7 @@ func TestAppendOnlyImmutabilityAndSessionDebounce_UT_TL_03(t *testing.T) {
 			_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"milestones\":[{\"revisions\":[2,3],\"title\":\"Storage Engine Update\",\"summary\":\"Expanded SQLite WAL and FTS5 index comparisons.\",\"chapter_slugs\":[\"01-system-architecture\"],\"authors\":[\"Bob Rivera\"]}]}"}]}}]}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"milestones\":[{\"revisions\":[4,5,6,7],\"title\":\"Phase 1 Lock-In Sequence\",\"summary\":\"Merged four rapid edits refining partner onboarding.\",\"chapter_slugs\":[\"04-deployment-ops\"],\"authors\":[\"Carol Park\"]}]}"}]}}]}`))
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"milestones\":[{\"revisions\":[4,5,6,7],\"title\":\"Staged Upgrade Sequence\",\"summary\":\"Merged four rapid edits refining partner onboarding.\",\"chapter_slugs\":[\"04-deployment-ops\"],\"authors\":[\"Carol Park\"]}]}"}]}}]}`))
 	}))
 	defer srv.Close()
 
@@ -209,6 +209,11 @@ func TestAppendOnlyImmutabilityAndSessionDebounce_UT_TL_03(t *testing.T) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	if len(eng.CurrentSnapshot().TimelineEntries) == 0 {
+		cancel()
+		wg.Wait()
+		t.Fatalf("timed out waiting for initial timeline milestone")
 	}
 	firstPublished := eng.CurrentSnapshot().TimelineEntries[0]
 	if firstPublished.Title != "Storage Engine Update" || firstPublished.EndRevision != 3 {

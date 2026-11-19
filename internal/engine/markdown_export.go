@@ -333,7 +333,24 @@ func (e *BookEngine) RenderBookAtRevision(revSpec string) (*renderer.RenderedBoo
 		chapters = append(chapters, cv)
 		bySlug[c.Slug] = cv
 	}
+	var authorViews []renderer.AuthorProfileView
+	if snap := e.CurrentSnapshot(); snap != nil && len(snap.Authors) > 0 {
+		authorViews = snap.Authors
+	} else if dbAuthors, aErr := e.store.ListAuthors(context.Background()); aErr == nil {
+		for _, a := range dbAuthors {
+			authorViews = append(authorViews, renderer.AuthorProfileView{
+				ID:          a.ID,
+				DisplayName: a.DisplayName,
+				Email:       a.GitEmail,
+				RoleBadge:   a.RoleBadge,
+			})
+		}
+	}
 	book := &renderer.RenderedBook{
+		BookTitle:          e.BookTitle(),
+		BookKicker:         e.BookKicker(),
+		MCPName:            e.MCPName(),
+		Authors:            authorViews,
 		HeadCommitSHA:      exp.RevisionSHA,
 		HeadRevisionNumber: exp.RevisionNumber,
 		SummaryMarkdown:    exp.SummaryMarkdown,
@@ -355,9 +372,13 @@ func (e *BookEngine) AssembleLLMsIndex(_ context.Context, revSpec string) (*Mark
 
 	fmt.Fprintf(&b, "# %s\n\n", e.BookTitle())
 	if book.IsLatest {
-		fmt.Fprintf(&b, "> Canonical Git-backed living book (%s). Current HEAD revision: r%d (%s) · %d chapters · %d words.\n\n", e.BookKicker(),
+		kickerClause := ""
+		if k := strings.TrimSpace(e.BookKicker()); k != "" && !strings.EqualFold(k, "Living Book") {
+			kickerClause = " (" + k + ")"
+		}
+		fmt.Fprintf(&b, "> Canonical Git-backed living book%s. Current HEAD revision: r%d (%s) · %d chapters · %d words.\n\n", kickerClause,
 			book.RevisionNumber, book.RevisionSHA, len(book.Chapters), book.TotalWords)
-		if snap := e.CurrentSnapshot(); snap != nil && (len(snap.TimelineEntries) > 0 || snap.PendingTimelineCommits > 0) {
+		if snap := e.CurrentSnapshot(); snap != nil && (len(snap.TimelineEntries) > 0 || snap.PendingTimelineCommits > 0 || len(snap.OpenCallouts) > 0) {
 			b.WriteString("## Timeline\n\n")
 			writeTimelineMarkdownItems(&b, base, snap, DefaultLLMsTimelineLimit, true)
 			b.WriteString("\n")
@@ -379,18 +400,26 @@ func (e *BookEngine) AssembleLLMsIndex(_ context.Context, revSpec string) (*Mark
 		book.RevisionNumber, book.RevisionSHA, base, book.RevisionSHA, book.RevisionSHA)
 
 	b.WriteString("## Table of Contents (Per-Chapter Raw Markdown)\n\n")
-	for _, ch := range book.Chapters {
+	for idx, ch := range book.Chapters {
 		if ch.StartsNewPart && ch.PartTitle != "" {
+			if idx > 0 {
+				b.WriteByte('\n')
+			}
 			fmt.Fprintf(&b, "### %s\n\n", ch.PartTitle)
 		}
 		indent := strings.Repeat("  ", int(ch.Depth))
-		liveMD := fmt.Sprintf("%s/chapters/%s.md", base, ch.Slug)
+		primaryMD := fmt.Sprintf("%s/chapters/%s.md", base, ch.Slug)
 		permMD := fmt.Sprintf("%s/rev/%s/chapters/%s.md", base, ch.LastCommitSHA, ch.Slug)
+		permRevNum := ch.RevisionNumber
+		permSHA := ch.LastCommitSHA
 		if !book.IsLatest {
-			permMD = fmt.Sprintf("%s/rev/%s/chapters/%s.md", base, book.RevisionSHA, ch.Slug)
+			primaryMD = fmt.Sprintf("%s/rev/%s/chapters/%s.md", base, book.RevisionSHA, ch.Slug)
+			permMD = primaryMD
+			permRevNum = book.RevisionNumber
+			permSHA = book.RevisionSHA
 		}
 		fmt.Fprintf(&b, "%s- [%s](%s) · [Permalink r%d (%s)](%s) · %d words · Updated %s by %s\n",
-			indent, ch.Title, liveMD, ch.RevisionNumber, ch.LastCommitSHA, permMD, ch.WordCount, ch.LastUpdatedISO, ch.LastAuthor)
+			indent, ch.Title, primaryMD, permRevNum, permSHA, permMD, ch.WordCount, ch.LastUpdatedISO, ch.LastAuthor)
 	}
 	b.WriteString("\n")
 
@@ -401,13 +430,16 @@ func (e *BookEngine) AssembleLLMsIndex(_ context.Context, revSpec string) (*Mark
 	fmt.Fprintf(&b, "- [Git Commit Log (changelog.md)](%s/changelog.md): Chronological Git commits r1..r%d with modified files.\n", base, book.HeadRevisionNumber)
 	fmt.Fprintf(&b, "- [Co-Author AI & MCP Setup Guide (guide.md)](%s/guide.md): Instructions for HTTP raw Markdown, Accept: text/markdown content negotiation, Remote MCP, and ConnectRPC.\n", base)
 	fmt.Fprintf(&b, "- [OpenAPI 3.1 Specification (openapi.json)](%s/openapi.json): Machine-readable ConnectRPC JSON schema for authenticated authoring.\n", base)
+	fmt.Fprintf(&b, "- Remote MCP Endpoint: %s/u/<email>:<secret-key>/mcp\n", base)
 	if extra := e.ExtraLLMsMarkdown(); extra != "" {
+		if !strings.HasPrefix(extra, "- ") && !strings.HasPrefix(extra, "* ") {
+			b.WriteByte('\n')
+		}
 		b.WriteString(extra)
 		if !strings.HasSuffix(extra, "\n") {
 			b.WriteByte('\n')
 		}
 	}
-	fmt.Fprintf(&b, "- Remote MCP Endpoint: %s/u/<email>:<secret-key>/mcp\n", base)
 
 	md := b.String()
 	return &MarkdownExportResult{
@@ -443,15 +475,22 @@ func (e *BookEngine) AssembleFullBookMarkdown(_ context.Context, revSpec string)
 	if snap := e.CurrentSnapshot(); snap != nil && len(snap.Authors) > 0 {
 		var parts []string
 		for _, a := range snap.Authors {
-			parts = append(parts, fmt.Sprintf("%s (%s)", a.DisplayName, a.Email))
+			if strings.TrimSpace(a.Email) != "" {
+				parts = append(parts, fmt.Sprintf("%s (%s)", a.DisplayName, a.Email))
+			} else {
+				parts = append(parts, a.DisplayName)
+			}
 		}
 		fmt.Fprintf(&b, "- **Co-Authors:** %s\n", strings.Join(parts, " · "))
 	}
 	fmt.Fprintf(&b, "- **Discovery Index:** %s/llms.txt\n\n", base)
 
 	b.WriteString("## Table of Contents\n\n")
-	for _, ch := range book.Chapters {
+	for idx, ch := range book.Chapters {
 		if ch.StartsNewPart && ch.PartTitle != "" {
+			if idx > 0 {
+				b.WriteByte('\n')
+			}
 			fmt.Fprintf(&b, "### %s\n\n", ch.PartTitle)
 		}
 		indent := strings.Repeat("  ", int(ch.Depth))
@@ -528,10 +567,13 @@ func (e *BookEngine) AssembleChangelogMarkdown(_ context.Context) (*MarkdownExpo
 				fileLinks = append(fileLinks, f)
 			}
 		}
-		summary := strings.ReplaceAll(strings.ReplaceAll(c.CommitMessage, "\n", " "), "|", "\\|")
-		filesCell := strings.Join(fileLinks, ", ")
+		escCell := func(s string) string {
+			return strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ", "|", "\\|").Replace(s))
+		}
+		summary := escCell(c.CommitMessage)
+		filesCell := escCell(strings.Join(fileLinks, ", "))
 		fmt.Fprintf(&b, "| %s | %s (%s) | %s | %s | %s |\n",
-			bookPerm, c.AuthorName, c.AuthorEmail, c.TimestampISO, summary, filesCell)
+			bookPerm, escCell(c.AuthorName), escCell(c.AuthorEmail), c.TimestampISO, summary, filesCell)
 	}
 
 	md := b.String()
@@ -613,9 +655,12 @@ func (e *BookEngine) AssembleTimelineMarkdown(_ context.Context) (*MarkdownExpor
 	fmt.Fprintf(&b, "> Current HEAD: **r%d (%s)** · %d chapters · %d milestones · RSS 2.0: %s/feed.xml.\n\n",
 		snap.HeadRevisionNumber, snap.HeadCommitSHA, len(snap.Chapters), len(snap.TimelineEntries), base)
 
-	if len(snap.TimelineEntries) == 0 && snap.PendingTimelineCommits == 0 {
+	if len(snap.TimelineEntries) == 0 && snap.PendingTimelineCommits == 0 && len(snap.OpenCallouts) == 0 {
 		b.WriteString("_No semantic timeline milestones synthesized yet._\n")
 	} else {
+		if len(snap.TimelineEntries) == 0 && snap.PendingTimelineCommits == 0 {
+			b.WriteString("_No semantic timeline milestones synthesized yet._\n")
+		}
 		writeTimelineMarkdownItems(&b, base, snap, 0, true)
 	}
 
@@ -656,7 +701,7 @@ func (e *BookEngine) AssembleSearchMarkdown(ctx context.Context, query, slugFilt
 		}
 		fmt.Fprintf(&b, "> Query: **%q**", q)
 		if slug != "" {
-			fmt.Fprintf(&b, " · Slug filter: `%s`", slug)
+			fmt.Fprintf(&b, " · Slug filter: %q", slug)
 		}
 		fmt.Fprintf(&b, " · Matches: **%d**\n\n", len(out.Matches))
 
@@ -689,6 +734,26 @@ func (e *BookEngine) AssembleSearchMarkdown(ctx context.Context, query, slugFilt
 		IsLatest:           true,
 		WordCount:          int32(len(strings.Fields(md))),
 	}, nil
+}
+
+// safeBacktickFenceFor returns a backtick fence strictly longer than any backtick run in body.
+func safeBacktickFenceFor(body string) string {
+	maxRun := 0
+	curRun := 0
+	for i := 0; i < len(body); i++ {
+		if body[i] == '`' {
+			curRun++
+			if curRun > maxRun {
+				maxRun = curRun
+			}
+		} else {
+			curRun = 0
+		}
+	}
+	if maxRun < 3 {
+		return "```"
+	}
+	return strings.Repeat("`", maxRun+1)
 }
 
 // AssembleChapterHistoryMarkdown renders section-level Git blame and recent unified diffs for a chapter (/chapters/{slug}/history.md).
@@ -728,9 +793,11 @@ func (e *BookEngine) AssembleChapterHistoryMarkdown(ctx context.Context, slug st
 		fmt.Fprintf(&b, "### r%d (`%s`) · %s · %s\n\n%s\n\n",
 			c.RevisionNumber, c.CommitSHA, c.AuthorName, c.TimestampISO, c.CommitMessage)
 		if diffOut, dErr := e.GetCommitDiff(ctx, &GetCommitDiffInput{CommitSHA: c.CommitSHA, Slug: normSlug}); dErr == nil && strings.TrimSpace(diffOut.UnifiedDiff) != "" {
-			b.WriteString("```diff\n")
-			b.WriteString(strings.TrimRight(diffOut.UnifiedDiff, "\n") + "\n")
-			b.WriteString("```\n\n")
+			diffBody := strings.TrimRight(diffOut.UnifiedDiff, "\n")
+			fence := safeBacktickFenceFor(diffBody)
+			b.WriteString(fence + "diff\n")
+			b.WriteString(diffBody + "\n")
+			b.WriteString(fence + "\n\n")
 		}
 	}
 
@@ -812,7 +879,7 @@ func (e *BookEngine) AssembleGuideMarkdown(_ context.Context) (*MarkdownExportRe
 	fmt.Fprintf(&b, "- **Mermaid Diagram Source:** %s/chapters/{slug}/diagrams/{n}.mmd\n\n", base)
 
 	b.WriteString("## 2. Remote Model Context Protocol (Authenticated Read/Write Co-Authoring)\n\n")
-	b.WriteString("Connect Claude, ChatGPT, or Gemini / Antigravity using your personal secret URL:\n\n")
+	b.WriteString("Connect Claude, ChatGPT, Gemini, Cursor, or any MCP-compatible client using your personal secret URL:\n\n")
 	fmt.Fprintf(&b, "- **Remote MCP Endpoint:** %s/u/<email>:<secret-key>/mcp\n", base)
 	fmt.Fprintf(&b, "- **OpenAPI 3.1 Specification:** %s/openapi.json (HTML reference: %s/api-docs)\n\n", base, base)
 

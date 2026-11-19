@@ -23,7 +23,7 @@ import (
 	"github.com/wjkoh/ghostbook/internal/store"
 )
 
-// version can be overridden at build time via -ldflags "-X main.version=v0.1.0".
+// version can be overridden at build time via -ldflags "-X main.version=v0.1.2".
 var version = "dev"
 
 func main() {
@@ -90,6 +90,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	}
 
 	fs := flag.NewFlagSet("ghostbook", flag.ContinueOnError)
+	fs.SetOutput(out)
 	var (
 		addr             = fs.String("addr", firstNonEmpty(os.Getenv("GHOSTBOOK_ADDR"), ":8090"), "HTTP listen address")
 		pprofAddr        = fs.String("pprof-addr", "", "Optional loopback-only pprof HTTP listen address (e.g. 127.0.0.1:6060)")
@@ -103,7 +104,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		urlPrefixStrip   = fs.String("url-prefix-strip", "", "Optional reverse-proxy URL path prefix to strip before routing (defaults to GHOSTBOOK_URL_PREFIX_STRIP)")
 		extraLLMsFile    = fs.String("extra-llms-file", "", "Optional Markdown file appended to /llms.txt (defaults to GHOSTBOOK_EXTRA_LLMS_FILE)")
 		bannedWords      = fs.String("banned-words", "", "Optional comma-separated editorial lint banned words (defaults to GHOSTBOOK_BANNED_WORDS)")
-		remoteURL        = fs.String("remote-url", "", "Optional Git remote URL for periodic go-git sync (defaults to GITHUB_REMOTE_URL)")
+		remoteURL        = fs.String("remote-url", "", "Optional Git remote URL for periodic go-git sync (defaults to GHOSTBOOK_REMOTE_URL or GITHUB_REMOTE_URL)")
 		syncInterval     = fs.Duration("sync-interval", parseEnvDuration("GHOSTBOOK_SYNC_INTERVAL", 60*time.Second), "Periodic Git remote sync interval")
 		sendInvites      = fs.Bool("send-invites", parseEnvBool("GHOSTBOOK_SEND_INVITES"), "Send pending co-author secret-key invite emails via Resend on startup")
 		resendAPIKey     = fs.String("resend-api-key", "", "Resend API key for co-author invites and operational alerts (defaults to RESEND_API_KEY)")
@@ -116,10 +117,13 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		geminiEndpoint   = fs.String("gemini-endpoint", "", "Optional Gemini or Vertex AI API endpoint override (defaults to GEMINI_ENDPOINT)")
 		vertexProject    = fs.String("vertex-project", "", "Optional GCP project ID for Vertex AI editorial timeline synthesis (defaults to VERTEX_PROJECT)")
 		vertexLocation   = fs.String("vertex-location", "", "Optional GCP location for Vertex AI (defaults to VERTEX_LOCATION)")
-		vertexCredsFile  = fs.String("vertex-credentials-file", "", "Path to GCP Service Account JSON key for Vertex AI")
+		vertexCredsFile  = fs.String("vertex-credentials-file", "", "Path to GCP Service Account JSON key for Vertex AI (defaults to VERTEX_CREDENTIALS_FILE or GOOGLE_APPLICATION_CREDENTIALS)")
 		briefingDebounce = fs.Duration("briefing-debounce", parseEnvDuration("GHOSTBOOK_BRIEFING_DEBOUNCE", engine.DefaultBriefingDebounce), "Quiet-period debounce duration before synthesizing front-page editorial timeline")
 	)
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return fmt.Errorf("parse flags: %w", err)
 	}
 
@@ -137,7 +141,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	effectivePrefixStrip := firstNonEmpty(*urlPrefixStrip, os.Getenv("GHOSTBOOK_URL_PREFIX_STRIP"))
 	effectiveExtraLLMsFile := firstNonEmpty(*extraLLMsFile, os.Getenv("GHOSTBOOK_EXTRA_LLMS_FILE"))
 	effectiveBannedWords := splitCSV(firstNonEmpty(*bannedWords, os.Getenv("GHOSTBOOK_BANNED_WORDS")))
-	effectiveRemoteURL := firstNonEmpty(*remoteURL, os.Getenv("GITHUB_REMOTE_URL"))
+	effectiveRemoteURL := firstNonEmpty(*remoteURL, firstNonEmptyEnv("GHOSTBOOK_REMOTE_URL", "GITHUB_REMOTE_URL"))
 	effectiveResendKey := firstNonEmpty(*resendAPIKey, os.Getenv("RESEND_API_KEY"))
 	effectiveResendEndpoint := firstNonEmpty(*resendEndpoint, os.Getenv("RESEND_ENDPOINT"))
 	effectiveMailFrom := firstNonEmpty(*mailFrom, os.Getenv("GHOSTBOOK_MAIL_FROM"))
@@ -149,6 +153,10 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	effectiveVertexProject := firstNonEmpty(*vertexProject, os.Getenv("VERTEX_PROJECT"))
 	effectiveVertexLocation := firstNonEmpty(*vertexLocation, os.Getenv("VERTEX_LOCATION"))
 	effectiveVertexCreds := firstNonEmpty(*vertexCredsFile, firstNonEmptyEnv("VERTEX_CREDENTIALS_FILE", "GOOGLE_APPLICATION_CREDENTIALS"))
+
+	if len(effectiveAlertRecipients) > 0 && (effectiveResendKey == "" || effectiveMailFrom == "") {
+		log.Printf("warning: alert-recipients configured but operational alerts disabled (both --resend-api-key and --mail-from are required)")
+	}
 
 	var extraLLMsMD string
 	if effectiveExtraLLMsFile != "" {
@@ -181,6 +189,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("open sqlite store: %w", err)
 	}
 	defer func() { _ = st.Close() }()
+	_ = os.Chmod(dbPath, 0o600)
 
 	if effectiveAuthorsFile != "" {
 		authorsCfg, err := store.LoadAuthorsFile(effectiveAuthorsFile)
@@ -191,20 +200,22 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 			return fmt.Errorf("sync authors-file %s: %w", effectiveAuthorsFile, err)
 		}
 		log.Printf("synced %d co-author(s) from %s", len(authorsCfg), effectiveAuthorsFile)
-	} else {
-		existingAuthors, err := st.ListAuthors(ctx)
-		if err == nil && len(existingAuthors) == 0 {
-			log.Printf("no co-authors configured yet; add one with: ghostbook authors add --data-dir %s --id alice --name \"Alice Chen\" --email alice@example.com", *dataDir)
-		}
+	}
+	if existingAuthors, err := st.ListAuthors(ctx); err == nil && len(existingAuthors) == 0 {
+		log.Printf("no active co-authors configured yet; add one with: ghostbook authors add --data-dir %s --id alice --name \"Alice Chen\" --email alice@example.com", *dataDir)
 	}
 
-	if *sendInvites && effectiveResendKey != "" && effectiveMailFrom != "" {
-		sentCount, err := st.SendPendingAuthorInvites(ctx, *baseURL, effectiveResendKey, effectiveResendEndpoint, mailCfg)
-		if err != nil {
-			log.Printf("warning: send pending author invites failed (sent=%d): %v", sentCount, err)
-			alerter.NotifyError(ctx, "startup_invite_error", err.Error(), "Failed to send pending author invites")
-		} else if sentCount > 0 {
-			log.Printf("dispatched %d co-author invite email(s) via Resend", sentCount)
+	if *sendInvites {
+		if effectiveResendKey == "" || effectiveMailFrom == "" {
+			log.Printf("warning: --send-invites enabled but skipped because --resend-api-key or --mail-from is empty")
+		} else {
+			sentCount, err := st.SendPendingAuthorInvites(ctx, *baseURL, effectiveResendKey, effectiveResendEndpoint, mailCfg)
+			if err != nil {
+				log.Printf("warning: send pending author invites failed (sent=%d): %v", sentCount, err)
+				alerter.NotifyError(ctx, "startup_invite_error", err.Error(), "Failed to send pending author invites")
+			} else if sentCount > 0 {
+				log.Printf("dispatched %d co-author invite email(s) via Resend", sentCount)
+			}
 		}
 	}
 
@@ -336,21 +347,27 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 
 func runAuthorsCommand(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: ghostbook authors <list|add> [flags]")
+		return fmt.Errorf("usage: ghostbook authors <list|add|revoke|rotate-key> [flags]")
 	}
 	sub := args[0]
 	switch sub {
 	case "list":
 		fs := flag.NewFlagSet("ghostbook authors list", flag.ContinueOnError)
+		fs.SetOutput(out)
 		dataDir := fs.String("data-dir", firstNonEmpty(os.Getenv("GHOSTBOOK_DATA_DIR"), "./data"), "Directory containing book_studio.db")
 		baseURL := fs.String("base-url", firstNonEmpty(os.Getenv("GHOSTBOOK_BASE_URL"), "http://127.0.0.1:8090"), "Public base URL for personalized URLs")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return fmt.Errorf("parse flags: %w", err)
 		}
-		if err := os.MkdirAll(*dataDir, 0o700); err != nil {
-			return fmt.Errorf("mkdir data-dir: %w", err)
+		dbPath := filepath.Join(*dataDir, "book_studio.db")
+		if _, err := os.Stat(dbPath); errors.Is(err, os.ErrNotExist) {
+			_, _ = fmt.Fprintln(out, "No co-authors configured.")
+			return nil
 		}
-		st, err := store.Open(filepath.Join(*dataDir, "book_studio.db"))
+		st, err := store.Open(dbPath)
 		if err != nil {
 			return fmt.Errorf("open sqlite store: %w", err)
 		}
@@ -373,14 +390,18 @@ func runAuthorsCommand(ctx context.Context, args []string, out io.Writer) error 
 
 	case "add":
 		fs := flag.NewFlagSet("ghostbook authors add", flag.ContinueOnError)
+		fs.SetOutput(out)
 		dataDir := fs.String("data-dir", firstNonEmpty(os.Getenv("GHOSTBOOK_DATA_DIR"), "./data"), "Directory containing book_studio.db")
 		baseURL := fs.String("base-url", firstNonEmpty(os.Getenv("GHOSTBOOK_BASE_URL"), "http://127.0.0.1:8090"), "Public base URL for personalized URLs")
 		id := fs.String("id", "", "Short lowercase author ID (e.g. alice)")
 		name := fs.String("name", "", "Author full display name (e.g. \"Alice Chen\")")
 		email := fs.String("email", "", "Author Git commit email (e.g. alice@example.com)")
-		badge := fs.String("badge", "Co-Author", "Optional role badge shown on setup guide")
+		badge := fs.String("badge", "", "Optional role badge shown on setup guide (defaults to \"Co-Author\" for new authors; preserved on update if omitted)")
 		aliases := fs.String("aliases", "", "Optional comma-separated login aliases")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return fmt.Errorf("parse flags: %w", err)
 		}
 		if strings.TrimSpace(*id) == "" || strings.TrimSpace(*name) == "" || strings.TrimSpace(*email) == "" {
@@ -389,11 +410,13 @@ func runAuthorsCommand(ctx context.Context, args []string, out io.Writer) error 
 		if err := os.MkdirAll(*dataDir, 0o700); err != nil {
 			return fmt.Errorf("mkdir data-dir: %w", err)
 		}
-		st, err := store.Open(filepath.Join(*dataDir, "book_studio.db"))
+		dbPath := filepath.Join(*dataDir, "book_studio.db")
+		st, err := store.Open(dbPath)
 		if err != nil {
 			return fmt.Errorf("open sqlite store: %w", err)
 		}
 		defer func() { _ = st.Close() }()
+		_ = os.Chmod(dbPath, 0o600)
 
 		author, err := st.UpsertAuthor(ctx, store.AuthorConfig{
 			ID:          *id,
@@ -410,8 +433,64 @@ func runAuthorsCommand(ctx context.Context, args []string, out io.Writer) error 
 			author.ID, author.DisplayName, author.GitEmail, base, author.AuthIdentifier(), base, author.AuthIdentifier())
 		return nil
 
+	case "revoke":
+		fs := flag.NewFlagSet("ghostbook authors revoke", flag.ContinueOnError)
+		fs.SetOutput(out)
+		dataDir := fs.String("data-dir", firstNonEmpty(os.Getenv("GHOSTBOOK_DATA_DIR"), "./data"), "Directory containing book_studio.db")
+		id := fs.String("id", "", "Author ID or email to revoke")
+		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
+			return fmt.Errorf("parse flags: %w", err)
+		}
+		if strings.TrimSpace(*id) == "" {
+			return fmt.Errorf("--id is required")
+		}
+		dbPath := filepath.Join(*dataDir, "book_studio.db")
+		st, err := store.Open(dbPath)
+		if err != nil {
+			return fmt.Errorf("open sqlite store: %w", err)
+		}
+		defer func() { _ = st.Close() }()
+		if err := st.RevokeAuthor(ctx, *id); err != nil {
+			return fmt.Errorf("revoke author: %w", err)
+		}
+		_, _ = fmt.Fprintf(out, "Revoked author %s (all tokens invalidated)\n", strings.TrimSpace(*id))
+		return nil
+
+	case "rotate-key":
+		fs := flag.NewFlagSet("ghostbook authors rotate-key", flag.ContinueOnError)
+		fs.SetOutput(out)
+		dataDir := fs.String("data-dir", firstNonEmpty(os.Getenv("GHOSTBOOK_DATA_DIR"), "./data"), "Directory containing book_studio.db")
+		baseURL := fs.String("base-url", firstNonEmpty(os.Getenv("GHOSTBOOK_BASE_URL"), "http://127.0.0.1:8090"), "Public base URL for personalized URLs")
+		id := fs.String("id", "", "Author ID or email whose secret key to rotate")
+		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
+			return fmt.Errorf("parse flags: %w", err)
+		}
+		if strings.TrimSpace(*id) == "" {
+			return fmt.Errorf("--id is required")
+		}
+		dbPath := filepath.Join(*dataDir, "book_studio.db")
+		st, err := store.Open(dbPath)
+		if err != nil {
+			return fmt.Errorf("open sqlite store: %w", err)
+		}
+		defer func() { _ = st.Close() }()
+		author, err := st.RotateAuthorSecretKey(ctx, *id)
+		if err != nil {
+			return fmt.Errorf("rotate author key: %w", err)
+		}
+		base := strings.TrimRight(strings.TrimSpace(*baseURL), "/")
+		_, _ = fmt.Fprintf(out, "Rotated secret key for %s (%s <%s>)\nGuide: %s/u/%s/guide\nMCP:   %s/u/%s/mcp\n",
+			author.ID, author.DisplayName, author.GitEmail, base, author.AuthIdentifier(), base, author.AuthIdentifier())
+		return nil
+
 	default:
-		return fmt.Errorf("unknown authors subcommand %q (expected list or add)", sub)
+		return fmt.Errorf("unknown authors subcommand %q (expected list, add, revoke, or rotate-key)", sub)
 	}
 }
 

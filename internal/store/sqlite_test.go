@@ -58,18 +58,49 @@ func TestLoadAuthorsFile_And_UpsertAuthor(t *testing.T) {
 	}
 	st := openTestStore(t)
 	created, err := st.UpsertAuthor(ctx, loaded[0])
-	if err != nil || len(created.SecretKey) != 16 {
+	if err != nil || len(created.SecretKey) != 32 {
 		t.Fatalf("UpsertAuthor: %+v (err=%v)", created, err)
 	}
-	// Re-upserting must preserve existing secret key
+	// Re-upserting without Badge must preserve existing secret key AND existing RoleBadge
 	updated, err := st.UpsertAuthor(ctx, store.AuthorConfig{
 		ID:          "dana",
 		DisplayName: "Dana Lin-Updated",
 		Email:       "dana@example.com",
-		Badge:       "Lead Editor",
 	})
-	if err != nil || updated.SecretKey != created.SecretKey || updated.DisplayName != "Dana Lin-Updated" {
-		t.Fatalf("UpsertAuthor preserve key: %+v (err=%v)", updated, err)
+	if err != nil || updated.SecretKey != created.SecretKey || updated.DisplayName != "Dana Lin-Updated" || updated.RoleBadge != "Editor" {
+		t.Fatalf("UpsertAuthor preserve key & badge: %+v (err=%v)", updated, err)
+	}
+	// RevokeAuthor must stay revoked even if email is later changed via UpsertAuthor
+	if err := st.RevokeAuthor(ctx, "dana"); err != nil {
+		t.Fatalf("RevokeAuthor: %v", err)
+	}
+	afterEmailChange, err := st.UpsertAuthor(ctx, store.AuthorConfig{
+		ID:          "dana",
+		DisplayName: "Dana Lin-Updated",
+		Email:       "dana2@example.com",
+	})
+	if err != nil || !afterEmailChange.Revoked {
+		t.Fatalf("expected revoked state preserved after email update: %+v (err=%v)", afterEmailChange, err)
+	}
+	if _, err := st.Authenticate(ctx, afterEmailChange.AuthIdentifier()); !errors.Is(err, store.ErrTokenRevoked) {
+		t.Fatalf("expected ErrTokenRevoked after email update, got %v", err)
+	}
+	// RotateAuthorSecretKey mints fresh 32-hex key, revokes old key, and re-enables author
+	rotated, err := st.RotateAuthorSecretKey(ctx, "dana")
+	if err != nil || len(rotated.SecretKey) != 32 || rotated.SecretKey == created.SecretKey || rotated.Revoked {
+		t.Fatalf("RotateAuthorSecretKey: %+v (err=%v)", rotated, err)
+	}
+	if _, err := st.Authenticate(ctx, rotated.AuthIdentifier()); err != nil {
+		t.Fatalf("Authenticate after rotation failed: %v", err)
+	}
+	if _, err := st.Authenticate(ctx, "dana2@example.com:"+created.SecretKey); err == nil {
+		t.Fatalf("expected old key to be rejected after rotation")
+	}
+	// SyncConfiguredAuthors must reject malformed aliases
+	if err := st.SyncConfiguredAuthors(ctx, []store.AuthorConfig{{
+		ID: "bad", DisplayName: "Bad Alias", Email: "bad@example.com", Aliases: []string{"bad:alias"},
+	}}); err == nil {
+		t.Fatalf("expected SyncConfiguredAuthors to reject colon in alias")
 	}
 }
 
@@ -282,8 +313,8 @@ func TestAuthorSecretKeyAndIdempotentInvites(t *testing.T) {
 	}
 	keysByID := make(map[string]string)
 	for _, a := range authors1 {
-		if len(a.SecretKey) != 16 {
-			t.Fatalf("expected 16-char secret_key for %s, got %q", a.ID, a.SecretKey)
+		if len(a.SecretKey) != 32 {
+			t.Fatalf("expected 32-char secret_key for %s, got %q", a.ID, a.SecretKey)
 		}
 		keysByID[a.ID] = a.SecretKey
 
@@ -657,7 +688,7 @@ func TestPlatformFeedback_CRUDRateLimitAndResendMock(t *testing.T) {
 	if strings.ContainsAny(gotMsg.Subject, "\r\n") || strings.ContainsAny(gotMsg.ReplyTo, "\r\n") {
 		t.Fatalf("expected CR/LF stripped from headers: subject=%q replyTo=%q", gotMsg.Subject, gotMsg.ReplyTo)
 	}
-	if gotMsg.ReplyTo != "Carol Park <carol@example.com>" {
+	if gotMsg.ReplyTo != `"Carol Park" <carol@example.com>` {
 		t.Fatalf("unexpected Reply-To: %q", gotMsg.ReplyTo)
 	}
 

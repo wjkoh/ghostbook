@@ -116,10 +116,10 @@ func buildOpenAPISpecDocument(baseURL, bookTitle string) map[string]any {
 		"Create a new chapter and register in SUMMARY.md",
 		"Creates a new Markdown chapter file, adds it to SUMMARY.md, commits to Git, indexes in FTS5, and returns style_warnings.",
 		map[string]any{
-			"slug":             prop{"type": "string", "description": "New chapter slug", "example": "08-regulatory-compliance"},
-			"title":            prop{"type": "string", "description": "Chapter title", "example": "Chapter 8: Cross-Border Regulatory Architecture"},
+			"slug":             prop{"type": "string", "description": "New chapter slug", "example": "08-deployment-guide"},
+			"title":            prop{"type": "string", "description": "Chapter title", "example": "Chapter 8: Deployment & Operations Guide"},
 			"initial_markdown": prop{"type": "string", "description": "Optional initial Markdown content (defaults to '# <title>')"},
-			"commit_message":   prop{"type": "string", "description": "Optional commit message", "example": "Add Chapter 8 on regulatory compliance"},
+			"commit_message":   prop{"type": "string", "description": "Optional commit message", "example": "Add Chapter 8 on deployment and operations"},
 			"author_name":      prop{"type": "string", "description": "Optional author name or ID override"},
 			"parent_slug":      prop{"type": "string", "description": "Optional parent chapter slug for nested sub-chapters"},
 			"part_title":       prop{"type": "string", "description": "Optional Part heading in SUMMARY.md"},
@@ -285,9 +285,11 @@ func resolveSafeOpenAPIServerURL(baseURL string, allowedHosts []string, r *http.
 		return cleanBase
 	}
 	reqHost := strings.ToLower(strings.TrimSpace(r.Host))
-	var configuredHost string
+	var configuredHost, configuredScheme, configuredPath string
 	if parsed, err := url.Parse(cleanBase); err == nil {
 		configuredHost = strings.ToLower(parsed.Host)
+		configuredScheme = strings.ToLower(parsed.Scheme)
+		configuredPath = strings.TrimRight(parsed.Path, "/")
 	}
 	allowedHost := reqHost == configuredHost
 	if !allowedHost {
@@ -301,13 +303,15 @@ func resolveSafeOpenAPIServerURL(baseURL string, allowedHosts []string, r *http.
 	if !allowedHost {
 		return cleanBase
 	}
-	scheme := "https"
-	if proto := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); proto == "https" || proto == "http" {
-		scheme = proto
-	} else if r.TLS == nil && strings.Contains(reqHost, ":") {
-		scheme = "http"
+	scheme := configuredScheme
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
 	}
-	return scheme + "://" + reqHost
+	return scheme + "://" + reqHost + configuredPath
 }
 
 func ServeOpenAPISpec(baseURL string, bookTitle string, allowedHosts ...string) http.HandlerFunc {
@@ -317,6 +321,11 @@ func ServeOpenAPISpec(baseURL string, bookTitle string, allowedHosts ...string) 
 	spec := buildOpenAPISpecDocument(baseURL, bookTitle)
 
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		serverURL := resolveSafeOpenAPIServerURL(baseURL, allowedHosts, r)
 		doc := map[string]any{
 			"openapi":    spec["openapi"],
@@ -327,10 +336,25 @@ func ServeOpenAPISpec(baseURL string, bookTitle string, allowedHosts ...string) 
 			"security":   spec["security"],
 			"paths":      spec["paths"],
 		}
+		body, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		body = append(body, '\n')
+		etag := computeStrongETag(body)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(doc)
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("ETag", etag)
+		if etagMatches(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		_, _ = w.Write(body)
 	}
 }
 
@@ -345,9 +369,6 @@ func ServeOpenAPIDocs(engOpt ...*engine.BookEngine) http.HandlerFunc {
 		baseURL = eng.BaseURL()
 		bookTitle = eng.BookTitle()
 	}
-	spec := buildOpenAPISpecDocument(baseURL, bookTitle)
-	infoMap, _ := spec["info"].(map[string]any)
-	title, _ := infoMap["title"].(string)
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -371,7 +392,6 @@ func ServeOpenAPIDocs(engOpt ...*engine.BookEngine) http.HandlerFunc {
 			BaseURL:     baseURL,
 			BookTitle:   bookTitle,
 			SpecVersion: "3.1.0",
-			Title:       title,
 		})
 		writeHTMLResponse(w, r, out, err, "/guide.md")
 	}

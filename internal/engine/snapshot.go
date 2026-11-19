@@ -29,6 +29,9 @@ func (e *BookEngine) buildCommitHistoryIndexLocked(recentLimit int) (*commitHist
 	if err != nil {
 		return nil, err
 	}
+	if len(chronological) == 0 {
+		return nil, fmt.Errorf("git repository has no commits")
+	}
 
 	head := chronological[len(chronological)-1]
 	headRev := revMap[head.Hash.String()]
@@ -42,7 +45,13 @@ func (e *BookEngine) buildCommitHistoryIndexLocked(recentLimit int) (*commitHist
 
 	for i := len(chronological) - 1; i >= 0; i-- {
 		c := chronological[i]
-		files, _ := commitModifiedFiles(c)
+		files, cached := e.commitFilesCache[c.Hash]
+		if !cached {
+			files, _ = commitModifiedFiles(c)
+			if e.commitFilesCache != nil {
+				e.commitFilesCache[c.Hash] = files
+			}
+		}
 		for _, p := range files {
 			if _, seen := latestByPath[p]; !seen {
 				latestByPath[p] = c
@@ -78,8 +87,7 @@ func (e *BookEngine) buildChapterViewLocked(
 ) (*renderer.ChapterView, store.ChapterFTSDoc, error) {
 	slug := item.Slug
 	relPath := filepath.ToSlash(filepath.Join("src", slug+".md"))
-	fullPath := filepath.Join(e.repoDir, "src", slug+".md")
-	rawBytes, err := os.ReadFile(fullPath)
+	rawBytes, err := e.readSrcFileSafe(slug + ".md")
 	if err != nil {
 		return nil, store.ChapterFTSDoc{}, err
 	}
@@ -209,9 +217,18 @@ func (e *BookEngine) rebuildSnapshotAndFTSLocked(ctx context.Context) error {
 	}
 	linkChapterPagination(chapters)
 
-	recentAct, _ := e.store.ListActivity(ctx, "", 30)
-	timelineRecords, _ := e.store.ListEditorialTimelineEntries(ctx, 0)
-	timelineState, _ := e.store.GetEditorialTimelineState(ctx)
+	recentAct, actErr := e.store.ListActivity(ctx, "", 30)
+	if actErr != nil {
+		slog.Warn("snapshot_list_activity_failed", "error", actErr)
+	}
+	timelineRecords, tlErr := e.store.ListEditorialTimelineEntries(ctx, 0)
+	if tlErr != nil {
+		slog.Warn("snapshot_list_timeline_failed", "error", tlErr)
+	}
+	timelineState, stErr := e.store.GetEditorialTimelineState(ctx)
+	if stErr != nil {
+		slog.Warn("snapshot_get_timeline_state_failed", "error", stErr)
+	}
 	pendingCount, pStart, pEnd := computePendingTimelineWindow(histIdx.headRevNum, timelineState)
 	openCallouts := extractOpenCallouts(chapters)
 	headSHA := shortSHA(histIdx.headCommit.Hash.String())
@@ -226,6 +243,8 @@ func (e *BookEngine) rebuildSnapshotAndFTSLocked(ctx context.Context) error {
 				RoleBadge:   a.RoleBadge,
 			})
 		}
+	} else {
+		slog.Warn("snapshot_list_authors_failed", "error", aErr)
 	}
 
 	e.snapshot.Store(&renderer.RenderedBook{

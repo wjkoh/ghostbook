@@ -72,13 +72,24 @@ func TestInternalHelpers_CoverageAndEdgeCases(t *testing.T) {
 		t.Fatalf("write key: %v", err)
 	}
 	t.Setenv("GITHUB_SSH_KEY_PATH", keyPath)
-	if auth := resolveGitAuth(); auth == nil {
-		t.Fatalf("expected non-nil SSH auth for valid key")
+	t.Setenv("GITHUB_KNOWN_HOSTS_PATH", filepath.Join(t.TempDir(), "missing_known_hosts"))
+	if _, err := resolveGitAuth("git@github.com:example/book.git"); err == nil {
+		t.Fatalf("expected fail-closed error when GITHUB_KNOWN_HOSTS_PATH is missing")
 	}
+	t.Setenv("GITHUB_KNOWN_HOSTS_PATH", "")
+	t.Setenv("GHOSTBOOK_INSECURE_IGNORE_HOST_KEY", "true")
+	if auth, err := resolveGitAuth("git@github.com:example/book.git"); err != nil || auth == nil {
+		t.Fatalf("expected non-nil SSH auth with explicit insecure opt-in, got auth=%v err=%v", auth, err)
+	}
+	// SSH key must NOT be returned for HTTPS URLs
+	if auth, err := resolveGitAuth("https://github.com/example/book.git"); err != nil || auth != nil {
+		t.Fatalf("expected nil auth for HTTPS URL without PAT, got auth=%v err=%v", auth, err)
+	}
+	t.Setenv("GHOSTBOOK_INSECURE_IGNORE_HOST_KEY", "")
 	t.Setenv("GITHUB_SSH_KEY_PATH", "")
 	t.Setenv("GITHUB_PAT", "ghp_test_token")
-	if auth := resolveGitAuth(); auth == nil {
-		t.Fatalf("expected non-nil HTTP PAT auth")
+	if auth, err := resolveGitAuth("https://github.com/example/book.git"); err != nil || auth == nil {
+		t.Fatalf("expected non-nil HTTP PAT auth, got auth=%v err=%v", auth, err)
 	}
 	t.Setenv("GITHUB_PAT", "")
 

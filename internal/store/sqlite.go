@@ -37,6 +37,7 @@ type Author struct {
 	GitEmail        string `json:"git_email"`
 	RoleBadge       string `json:"role_badge"`
 	SecretKey       string `json:"-"`
+	Revoked         bool   `json:"revoked,omitempty"`
 	InviteSentAt    string `json:"invite_sent_at,omitempty"`
 	InviteMessageID string `json:"invite_message_id,omitempty"`
 }
@@ -233,11 +234,42 @@ func canonicalizeCredential(raw string) (aliasPart, secretPart, canonical string
 }
 
 func generateSecretKey() (string, error) {
-	var b [8]byte
+	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+func normalizeAndValidateAuthorConfig(cfg AuthorConfig) (AuthorConfig, error) {
+	id := strings.ToLower(strings.TrimSpace(cfg.ID))
+	displayName := strings.TrimSpace(cfg.DisplayName)
+	email := strings.ToLower(strings.TrimSpace(cfg.Email))
+	badge := strings.TrimSpace(cfg.Badge)
+	if id == "" || displayName == "" || email == "" {
+		return AuthorConfig{}, fmt.Errorf("author id, display_name, and email are required")
+	}
+	if strings.ContainsAny(id, " :\t\r\n/") || strings.ContainsAny(email, " :\t\r\n/") {
+		return AuthorConfig{}, fmt.Errorf("author id and email must not contain spaces, colons, or slashes")
+	}
+	var cleanAliases []string
+	for _, rawAlias := range cfg.Aliases {
+		a := strings.ToLower(strings.TrimSpace(rawAlias))
+		if a == "" {
+			continue
+		}
+		if strings.ContainsAny(a, " :\t\r\n/") {
+			return AuthorConfig{}, fmt.Errorf("author alias %q must not contain spaces, colons, or slashes", rawAlias)
+		}
+		cleanAliases = append(cleanAliases, a)
+	}
+	return AuthorConfig{
+		ID:          id,
+		DisplayName: displayName,
+		Email:       email,
+		Badge:       badge,
+		Aliases:     cleanAliases,
+	}, nil
 }
 
 func (s *Store) initSchema() error {
@@ -248,14 +280,16 @@ func (s *Store) initSchema() error {
 		return fmt.Errorf("exec schema.sql: %w", err)
 	}
 
-	// Idempotent column & index migrations for existing SQLite databases
+	// Idempotent column migrations for existing SQLite databases
 	for _, stmt := range []string{
 		`ALTER TABLE authors ADD COLUMN secret_key TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE authors ADD COLUMN revoked INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE authors ADD COLUMN invite_sent_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE authors ADD COLUMN invite_message_id TEXT NOT NULL DEFAULT ''`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_author_id_desc ON agent_audit_log(author_id, id DESC)`,
 	} {
-		_, _ = s.db.Exec(stmt)
+		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return fmt.Errorf("migrate schema (%s): %w", stmt, err)
+		}
 	}
 
 	// Revoke any legacy secretless bare-email or bare-ID tokens from earlier schema versions
@@ -273,79 +307,90 @@ func (s *Store) initSchema() error {
 	return nil
 }
 
-// UpsertAuthor registers or updates a single co-author, generating a random 16-hex secret_key
-// if the author is new while preserving any existing secret_key in SQLite.
+// UpsertAuthor registers or updates a single co-author, generating a random 32-hex (128-bit)
+// secret_key if the author is new while preserving any existing secret_key and revocation state.
+// If cfg.Badge is empty on an existing author, the existing role_badge is preserved.
 func (s *Store) UpsertAuthor(ctx context.Context, cfg AuthorConfig) (*Author, error) {
-	id := strings.ToLower(strings.TrimSpace(cfg.ID))
-	displayName := strings.TrimSpace(cfg.DisplayName)
-	email := strings.ToLower(strings.TrimSpace(cfg.Email))
-	badge := strings.TrimSpace(cfg.Badge)
-	if badge == "" {
-		badge = "Co-Author"
-	}
-	if id == "" || displayName == "" || email == "" {
-		return nil, fmt.Errorf("author id, display_name, and email are required")
-	}
-	if strings.ContainsAny(id, " :\t\r\n/") || strings.ContainsAny(email, " :\t\r\n/") {
-		return nil, fmt.Errorf("author id and email must not contain spaces, colons, or slashes")
+	norm, err := normalizeAndValidateAuthorConfig(cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.upsertAuthorLocked(ctx, AuthorConfig{
-		ID:          id,
-		DisplayName: displayName,
-		Email:       email,
-		Badge:       badge,
-		Aliases:     cfg.Aliases,
-	})
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	author, err := s.upsertAuthorTxLocked(ctx, tx, norm)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return author, nil
 }
 
-// SyncConfiguredAuthors upserts every author from a configuration list without rotating existing secret keys.
+// SyncConfiguredAuthors atomically upserts every author from a configuration list without rotating
+// existing secret keys or silently un-revoking previously revoked authors.
 func (s *Store) SyncConfiguredAuthors(ctx context.Context, authors []AuthorConfig) error {
+	normalized := make([]AuthorConfig, 0, len(authors))
+	seenGlobalAliases := make(map[string]string)
+	for _, cfg := range authors {
+		norm, err := normalizeAndValidateAuthorConfig(cfg)
+		if err != nil {
+			return fmt.Errorf("invalid author config %+v: %w", cfg, err)
+		}
+		for _, alias := range append([]string{norm.Email, norm.ID}, norm.Aliases...) {
+			if prev, exists := seenGlobalAliases[alias]; exists && prev != norm.ID {
+				return fmt.Errorf("duplicate author alias %q shared by %q and %q", alias, prev, norm.ID)
+			}
+			seenGlobalAliases[alias] = norm.ID
+		}
+		normalized = append(normalized, norm)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for _, cfg := range authors {
-		id := strings.ToLower(strings.TrimSpace(cfg.ID))
-		displayName := strings.TrimSpace(cfg.DisplayName)
-		email := strings.ToLower(strings.TrimSpace(cfg.Email))
-		badge := strings.TrimSpace(cfg.Badge)
-		if badge == "" {
-			badge = "Co-Author"
-		}
-		if id == "" || displayName == "" || email == "" {
-			return fmt.Errorf("invalid author config %+v: id, display_name, and email are required", cfg)
-		}
-		if _, err := s.upsertAuthorLocked(ctx, AuthorConfig{
-			ID:          id,
-			DisplayName: displayName,
-			Email:       email,
-			Badge:       badge,
-			Aliases:     cfg.Aliases,
-		}); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, norm := range normalized {
+		if _, err := s.upsertAuthorTxLocked(ctx, tx, norm); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
-func (s *Store) upsertAuthorLocked(ctx context.Context, a AuthorConfig) (*Author, error) {
-	_, err := s.db.ExecContext(ctx, `
+func (s *Store) upsertAuthorTxLocked(ctx context.Context, tx *sql.Tx, a AuthorConfig) (*Author, error) {
+	insertBadge := a.Badge
+	if insertBadge == "" {
+		insertBadge = "Co-Author"
+	}
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO authors (id, display_name, git_email, role_badge)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			display_name = excluded.display_name,
 			git_email = excluded.git_email,
-			role_badge = excluded.role_badge
-	`, a.ID, a.DisplayName, a.Email, a.Badge)
+			role_badge = CASE WHEN ? != '' THEN ? ELSE authors.role_badge END
+	`, a.ID, a.DisplayName, a.Email, insertBadge, a.Badge, a.Badge)
 	if err != nil {
 		return nil, fmt.Errorf("upsert author %s: %w", a.ID, err)
 	}
 
 	var secretKey string
-	if err := s.db.QueryRowContext(ctx, `SELECT secret_key FROM authors WHERE id = ?`, a.ID).Scan(&secretKey); err != nil {
+	var authorRevoked int
+	if err := tx.QueryRowContext(ctx, `SELECT secret_key, revoked FROM authors WHERE id = ?`, a.ID).Scan(&secretKey, &authorRevoked); err != nil {
 		return nil, fmt.Errorf("query secret_key for %s: %w", a.ID, err)
 	}
 	if strings.TrimSpace(secretKey) == "" {
@@ -354,8 +399,17 @@ func (s *Store) upsertAuthorLocked(ctx context.Context, a AuthorConfig) (*Author
 			return nil, fmt.Errorf("generate secret_key for %s: %w", a.ID, err)
 		}
 		secretKey = generated
-		if _, err := s.db.ExecContext(ctx, `UPDATE authors SET secret_key = ? WHERE id = ?`, secretKey, a.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE authors SET secret_key = ? WHERE id = ?`, secretKey, a.ID); err != nil {
 			return nil, fmt.Errorf("update secret_key for %s: %w", a.ID, err)
+		}
+	}
+
+	// Preserve existing revocation if all current tokens for this author were revoked
+	if authorRevoked == 0 {
+		var totalTokens, revokedTokens int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(revoked), 0) FROM auth_tokens WHERE author_id = ?`, a.ID).Scan(&totalTokens, &revokedTokens); err == nil && totalTokens > 0 && totalTokens == revokedTokens {
+			authorRevoked = 1
+			_, _ = tx.ExecContext(ctx, `UPDATE authors SET revoked = 1 WHERE id = ?`, a.ID)
 		}
 	}
 
@@ -376,34 +430,47 @@ func (s *Store) upsertAuthorLocked(ctx context.Context, a AuthorConfig) (*Author
 		fullCred := alias + ":" + strings.ToLower(secretKey)
 		h := HashToken(fullCred)
 		redactedLabel := alias + ":redacted"
-		_, err := s.db.ExecContext(ctx, `
+		_, err := tx.ExecContext(ctx, `
 			INSERT INTO auth_tokens (token_hash, raw_identifier, author_id, client_label, revoked)
-			VALUES (?, ?, ?, ?, 0)
+			VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT(token_hash) DO UPDATE SET
-				raw_identifier = excluded.raw_identifier
-		`, h, redactedLabel, a.ID, a.DisplayName+" ("+a.ID+")")
+				raw_identifier = excluded.raw_identifier,
+				client_label = excluded.client_label
+		`, h, redactedLabel, a.ID, a.DisplayName+" ("+a.ID+")", authorRevoked)
 		if err != nil {
 			return nil, fmt.Errorf("seed token %s: %w", redactedLabel, err)
 		}
 	}
 
-	return s.queryAuthorByIDLocked(ctx, a.ID)
+	var author Author
+	var revokedInt int
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, display_name, git_email, role_badge, secret_key, revoked, invite_sent_at, invite_message_id
+		FROM authors WHERE id = ?
+	`, a.ID).Scan(&author.ID, &author.DisplayName, &author.GitEmail, &author.RoleBadge, &author.SecretKey, &revokedInt, &author.InviteSentAt, &author.InviteMessageID)
+	if err != nil {
+		return nil, err
+	}
+	author.Revoked = revokedInt != 0
+	return &author, nil
 }
 
 func (s *Store) queryAuthorByIDLocked(ctx context.Context, authorID string) (*Author, error) {
 	var author Author
+	var revokedInt int
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, display_name, git_email, role_badge, secret_key, invite_sent_at, invite_message_id
+		SELECT id, display_name, git_email, role_badge, secret_key, revoked, invite_sent_at, invite_message_id
 		FROM authors WHERE id = ?
-	`, authorID).Scan(&author.ID, &author.DisplayName, &author.GitEmail, &author.RoleBadge, &author.SecretKey, &author.InviteSentAt, &author.InviteMessageID)
+	`, authorID).Scan(&author.ID, &author.DisplayName, &author.GitEmail, &author.RoleBadge, &author.SecretKey, &revokedInt, &author.InviteSentAt, &author.InviteMessageID)
 	if err != nil {
 		return nil, err
 	}
+	author.Revoked = revokedInt != 0
 	return &author, nil
 }
 
 func (s *Store) isAuthorCredentialRevokedLocked(ctx context.Context, author *Author) bool {
-	if author == nil || strings.TrimSpace(author.SecretKey) == "" {
+	if author == nil || strings.TrimSpace(author.SecretKey) == "" || author.Revoked {
 		return true
 	}
 	primaryHash := HashToken(strings.ToLower(author.GitEmail) + ":" + strings.ToLower(author.SecretKey))
@@ -439,14 +506,16 @@ func (s *Store) Authenticate(ctx context.Context, rawTokenOrEmail string) (*Auth
 		author = a
 	} else {
 		var resolved Author
+		var revokedInt int
 		qErr := s.db.QueryRowContext(ctx, `
-			SELECT id, display_name, git_email, role_badge, secret_key, invite_sent_at, invite_message_id
+			SELECT id, display_name, git_email, role_badge, secret_key, revoked, invite_sent_at, invite_message_id
 			FROM authors
 			WHERE LOWER(git_email) = ? OR LOWER(id) = ?
-		`, emailPart, emailPart).Scan(&resolved.ID, &resolved.DisplayName, &resolved.GitEmail, &resolved.RoleBadge, &resolved.SecretKey, &resolved.InviteSentAt, &resolved.InviteMessageID)
+		`, emailPart, emailPart).Scan(&resolved.ID, &resolved.DisplayName, &resolved.GitEmail, &resolved.RoleBadge, &resolved.SecretKey, &revokedInt, &resolved.InviteSentAt, &resolved.InviteMessageID)
 		if qErr != nil || resolved.SecretKey == "" {
 			return nil, ErrUnauthorized
 		}
+		resolved.Revoked = revokedInt != 0
 		author = &resolved
 	}
 
@@ -492,19 +561,25 @@ func (s *Store) ResolveAuthorName(ctx context.Context, nameOrEmail string) (*Aut
 	defer s.mu.Unlock()
 
 	var a Author
+	var revokedInt int
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, display_name, git_email, role_badge, secret_key, invite_sent_at, invite_message_id
+		SELECT id, display_name, git_email, role_badge, secret_key, revoked, invite_sent_at, invite_message_id
 		FROM authors
-		WHERE LOWER(display_name) = ? OR LOWER(id) = ? OR LOWER(git_email) = ?
-	`, cleaned, cleaned, cleaned).Scan(&a.ID, &a.DisplayName, &a.GitEmail, &a.RoleBadge, &a.SecretKey, &a.InviteSentAt, &a.InviteMessageID)
+		WHERE revoked = 0 AND (LOWER(display_name) = ? OR LOWER(id) = ? OR LOWER(git_email) = ?)
+		ORDER BY id ASC
+		LIMIT 1
+	`, cleaned, cleaned, cleaned).Scan(&a.ID, &a.DisplayName, &a.GitEmail, &a.RoleBadge, &a.SecretKey, &revokedInt, &a.InviteSentAt, &a.InviteMessageID)
 	if err == nil {
+		a.Revoked = revokedInt != 0
 		return &a, nil
 	}
 
 	var aliasAuthorID string
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT author_id FROM auth_tokens
-		WHERE raw_identifier = ?
+		SELECT t.author_id FROM auth_tokens t
+		JOIN authors a ON a.id = t.author_id
+		WHERE t.raw_identifier = ? AND t.revoked = 0 AND a.revoked = 0
+		ORDER BY t.author_id ASC
 		LIMIT 1
 	`, cleaned+":redacted").Scan(&aliasAuthorID); err == nil {
 		if fallback, ferr := s.queryAuthorByIDLocked(ctx, aliasAuthorID); ferr == nil {
@@ -519,8 +594,9 @@ func (s *Store) ListAuthors(ctx context.Context) ([]Author, error) {
 	defer s.mu.Unlock()
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, display_name, git_email, role_badge, secret_key, invite_sent_at, invite_message_id
+		SELECT id, display_name, git_email, role_badge, secret_key, revoked, invite_sent_at, invite_message_id
 		FROM authors
+		WHERE revoked = 0
 		ORDER BY id ASC
 	`)
 	if err != nil {
@@ -531,9 +607,11 @@ func (s *Store) ListAuthors(ctx context.Context) ([]Author, error) {
 	var out []Author
 	for rows.Next() {
 		var a Author
-		if err := rows.Scan(&a.ID, &a.DisplayName, &a.GitEmail, &a.RoleBadge, &a.SecretKey, &a.InviteSentAt, &a.InviteMessageID); err != nil {
+		var revokedInt int
+		if err := rows.Scan(&a.ID, &a.DisplayName, &a.GitEmail, &a.RoleBadge, &a.SecretKey, &revokedInt, &a.InviteSentAt, &a.InviteMessageID); err != nil {
 			return nil, err
 		}
+		a.Revoked = revokedInt != 0
 		out = append(out, a)
 	}
 	return out, rows.Err()
@@ -546,7 +624,7 @@ func (s *Store) ListAuthorsPendingInvite(ctx context.Context) ([]Author, error) 
 	}
 	var pending []Author
 	for _, a := range authors {
-		if strings.TrimSpace(a.InviteSentAt) == "" && strings.TrimSpace(a.SecretKey) != "" {
+		if !a.Revoked && strings.TrimSpace(a.InviteSentAt) == "" && strings.TrimSpace(a.SecretKey) != "" {
 			pending = append(pending, a)
 		}
 	}
@@ -590,10 +668,123 @@ func (s *Store) RevokeToken(ctx context.Context, rawTokenOrEmail string) error {
 		}
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE auth_tokens SET revoked = 1 WHERE author_id = ?`, authorID); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	return nil
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `UPDATE authors SET revoked = 1 WHERE id = ?`, authorID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE auth_tokens SET revoked = 1 WHERE author_id = ?`, authorID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RevokeAuthor revokes a co-author by ID or email, invalidating all associated tokens.
+func (s *Store) RevokeAuthor(ctx context.Context, authorIDOrEmail string) error {
+	cleaned := strings.ToLower(strings.TrimSpace(authorIDOrEmail))
+	if cleaned == "" {
+		return ErrNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var authorID string
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM authors WHERE LOWER(id) = ? OR LOWER(git_email) = ? LIMIT 1`, cleaned, cleaned).Scan(&authorID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `UPDATE authors SET revoked = 1 WHERE id = ?`, authorID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE auth_tokens SET revoked = 1 WHERE author_id = ?`, authorID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RotateAuthorSecretKey generates a fresh 128-bit secret key for an author, revokes all prior tokens,
+// re-enables the author, and re-mints active tokens for their known aliases.
+func (s *Store) RotateAuthorSecretKey(ctx context.Context, authorIDOrEmail string) (*Author, error) {
+	cleaned := strings.ToLower(strings.TrimSpace(authorIDOrEmail))
+	if cleaned == "" {
+		return nil, ErrNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var authorID, displayName, gitEmail string
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT id, display_name, git_email FROM authors WHERE LOWER(id) = ? OR LOWER(git_email) = ? LIMIT 1
+	`, cleaned, cleaned).Scan(&authorID, &displayName, &gitEmail); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	newSecret, err := generateSecretKey()
+	if err != nil {
+		return nil, fmt.Errorf("generate secret key: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Collect existing aliases from auth_tokens before revoking
+	aliasSet := map[string]bool{
+		strings.ToLower(strings.TrimSpace(gitEmail)): true,
+		strings.ToLower(strings.TrimSpace(authorID)): true,
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT raw_identifier FROM auth_tokens WHERE author_id = ?`, authorID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var rawID string
+		if scanErr := rows.Scan(&rawID); scanErr == nil {
+			if idx := strings.IndexByte(rawID, ':'); idx > 0 {
+				alias := strings.ToLower(strings.TrimSpace(rawID[:idx]))
+				if alias != "" {
+					aliasSet[alias] = true
+				}
+			}
+		}
+	}
+	_ = rows.Close()
+
+	if _, err := tx.ExecContext(ctx, `UPDATE auth_tokens SET revoked = 1 WHERE author_id = ?`, authorID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE authors SET secret_key = ?, revoked = 0, invite_sent_at = '', invite_message_id = '' WHERE id = ?`, newSecret, authorID); err != nil {
+		return nil, err
+	}
+	for alias := range aliasSet {
+		h := HashToken(alias + ":" + strings.ToLower(newSecret))
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO auth_tokens (token_hash, raw_identifier, author_id, client_label, revoked)
+			VALUES (?, ?, ?, ?, 0)
+			ON CONFLICT(token_hash) DO UPDATE SET revoked = 0, raw_identifier = excluded.raw_identifier
+		`, h, alias+":redacted", authorID, displayName+" ("+authorID+")"); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.queryAuthorByIDLocked(ctx, authorID)
 }
 
 func (s *Store) ReplaceAllChaptersFTS(ctx context.Context, docs []ChapterFTSDoc) error {
@@ -1059,8 +1250,9 @@ func (s *Store) GetEditorialTimelineState(ctx context.Context) (*TimelineStateRe
 	return &st, nil
 }
 
-// AppendEditorialTimelineEntries inserts zero or more immutable milestone rows and advances
-// editorial_timeline_state inside a single SQLite transaction without ever mutating existing rows.
+// AppendEditorialTimelineEntries inserts zero or more immutable milestone rows (expected in
+// newest-first order, inserted oldest-to-newest so AUTOINCREMENT IDs increase with time) and
+// advances editorial_timeline_state inside a single SQLite transaction without mutating existing rows.
 func (s *Store) AppendEditorialTimelineEntries(ctx context.Context, entries []TimelineEntryRecord, state TimelineStateRecord) ([]TimelineEntryRecord, error) {
 	state.LastHeadSHA = strings.TrimSpace(state.LastHeadSHA)
 	if state.LastHeadSHA == "" || state.LastHeadRevision <= 0 {

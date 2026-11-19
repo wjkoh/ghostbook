@@ -14,29 +14,34 @@ func (e *BookEngine) triggerSync() {
 }
 
 // SyncWithRemote synchronizes the Git repository with the configured "origin" remote
-// using bounded context timeouts and rebuilds the in-memory snapshot if new commits arrive.
+// using bounded context timeouts and rebuilds the in-memory snapshot whenever new commits arrive,
+// even if a subsequent push fails.
 func (e *BookEngine) SyncWithRemote(ctx context.Context) error {
 	start := time.Now()
 	e.syncMu.Lock()
 	defer e.syncMu.Unlock()
 
-	pulledNewCommits, err := e.pullAndPushOrigin(ctx)
-	if err != nil {
-		slog.Warn("git_remote_sync_failed", "error", err.Error(), "duration_ms", time.Since(start).Milliseconds())
-		if ctx.Err() == nil {
-			e.NotifyAlert(ctx, "git_remote_sync", "Git remote sync failed", err.Error())
-		}
-		return err
-	}
+	pulledNewCommits, syncErr := e.pullAndPushOrigin(ctx)
 	if pulledNewCommits {
 		e.mu.Lock()
 		slog.Info("git_remote_sync_pulled_commits", "duration_ms", time.Since(start).Milliseconds())
-		err := e.rebuildSnapshotAndFTSLocked(context.WithoutCancel(ctx))
+		rebuildErr := e.rebuildSnapshotAndFTSLocked(context.WithoutCancel(ctx))
 		e.mu.Unlock()
-		if err != nil {
-			return err
+		if rebuildErr != nil {
+			slog.Warn("git_remote_sync_rebuild_failed", "error", rebuildErr.Error())
+			if syncErr == nil {
+				return rebuildErr
+			}
+		} else {
+			e.triggerBriefingRefresh()
 		}
-		e.triggerBriefingRefresh()
+	}
+	if syncErr != nil {
+		slog.Warn("git_remote_sync_failed", "error", syncErr.Error(), "duration_ms", time.Since(start).Milliseconds())
+		if ctx.Err() == nil {
+			e.NotifyAlert(ctx, "git_remote_sync", "Git remote sync failed", syncErr.Error())
+		}
+		return syncErr
 	}
 	return nil
 }

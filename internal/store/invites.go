@@ -3,10 +3,14 @@ package store
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/mail"
 	"strings"
 	"testing"
 	"time"
@@ -95,18 +99,15 @@ func formatMailboxHeader(displayName, email string) string {
 	if cleanName == "" {
 		return cleanEmail
 	}
-	if strings.ContainsAny(cleanName, `,;:<>\@"()[]`) {
-		escaped := strings.ReplaceAll(strings.ReplaceAll(cleanName, `\`, `\\`), `"`, `\"`)
-		return fmt.Sprintf(`"%s" <%s>`, escaped, cleanEmail)
-	}
-	return fmt.Sprintf("%s <%s>", cleanName, cleanEmail)
+	addr := &mail.Address{Name: cleanName, Address: cleanEmail}
+	return addr.String()
 }
 
 type resendSendResponse struct {
 	ID string `json:"id"`
 }
 
-// SendPendingAuthorInvites checks SQLite for any co-authors whose invite_sent_at is empty,
+// SendPendingAuthorInvites checks SQLite for any active co-authors whose invite_sent_at is empty,
 // dispatches their personalized invite email via Resend, and records invite_sent_at and invite_message_id.
 func (s *Store) SendPendingAuthorInvites(ctx context.Context, baseURL, resendAPIKey, resendEndpoint string, mailCfg ...MailConfig) (int, error) {
 	apiKey := strings.TrimSpace(resendAPIKey)
@@ -120,8 +121,8 @@ func (s *Store) SendPendingAuthorInvites(ctx context.Context, baseURL, resendAPI
 	if strings.TrimSpace(cfg.From) == "" {
 		return 0, fmt.Errorf("mail_from is required to send author invites")
 	}
-	endpoint := strings.TrimSpace(resendEndpoint)
-	if endpoint == "" || endpoint == DefaultResendEndpoint {
+	endpoint := strings.TrimRight(strings.TrimSpace(resendEndpoint), "/")
+	if endpoint == "" || endpoint == strings.TrimRight(DefaultResendEndpoint, "/") {
 		if testing.Testing() {
 			return 0, fmt.Errorf("refusing to call production Resend API during go test without mock endpoint")
 		}
@@ -140,40 +141,47 @@ func (s *Store) SendPendingAuthorInvites(ctx context.Context, baseURL, resendAPI
 
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 	sentCount := 0
+	var errs []error
 
 	for _, author := range pending {
 		msg := BuildAuthorInviteEmail(baseURL, author, cfg)
 		payload, err := json.Marshal(msg)
 		if err != nil {
-			return sentCount, fmt.Errorf("marshal invite for %s: %w", author.GitEmail, err)
+			errs = append(errs, fmt.Errorf("marshal invite for %s: %w", author.GitEmail, err))
+			continue
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 		if err != nil {
-			return sentCount, fmt.Errorf("create request for %s: %w", author.GitEmail, err)
+			errs = append(errs, fmt.Errorf("create request for %s: %w", author.GitEmail, err))
+			continue
 		}
+		idempSum := sha256.Sum256([]byte(strings.TrimRight(strings.TrimSpace(baseURL), "/") + ":" + author.ID + ":" + author.SecretKey))
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Idempotency-Key", "ghostbook-invite-"+author.ID)
+		req.Header.Set("Idempotency-Key", "ghostbook-invite-"+hex.EncodeToString(idempSum[:12]))
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			return sentCount, fmt.Errorf("send invite to %s: %w", author.GitEmail, err)
+			errs = append(errs, fmt.Errorf("send invite to %s: %w", author.GitEmail, err))
+			continue
 		}
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		_ = resp.Body.Close()
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return sentCount, fmt.Errorf("resend API error for %s (HTTP %d): %s", author.GitEmail, resp.StatusCode, strings.TrimSpace(string(respBody)))
+			errs = append(errs, fmt.Errorf("resend API error for %s (HTTP %d): %s", author.GitEmail, resp.StatusCode, strings.TrimSpace(string(respBody))))
+			continue
 		}
 
 		var parsed resendSendResponse
 		_ = json.Unmarshal(respBody, &parsed)
 		if err := s.MarkAuthorInviteSent(ctx, author.ID, parsed.ID, time.Now().UTC().Format(time.RFC3339)); err != nil {
-			return sentCount, fmt.Errorf("mark invite sent for %s: %w", author.GitEmail, err)
+			errs = append(errs, fmt.Errorf("mark invite sent for %s: %w", author.GitEmail, err))
+			continue
 		}
 		sentCount++
 	}
 
-	return sentCount, nil
+	return sentCount, errors.Join(errs...)
 }

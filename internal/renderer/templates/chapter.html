@@ -23,9 +23,11 @@
       </div>
 
       <div class="topbar-right">
+        {{if and (ne .ActiveChapter.LifecycleStatus "deleted") (ne .ActiveChapter.LifecycleStatus "moved") (ne .ActiveChapter.Slug "SUMMARY") (ne .ActiveChapter.Slug "STYLE_GUIDE")}}
         <a href="/chapters/{{.ActiveChapter.Slug}}/history" class="studio-btn" id="linkChapterHistory">
           History &amp; Blame
         </a>
+        {{end}}
         {{template "theme_select" .}}
       </div>
     </header>

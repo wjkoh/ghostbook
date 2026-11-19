@@ -168,13 +168,19 @@ var (
 )
 
 func sanitizeLaTeXMath(expr string) string {
-	// Fix unescaped & inside \text{...} with a bounded iteration cap
+	// Fix every unescaped & inside \text{...} with a bounded iteration cap
 	for iter := 0; iter < 16; iter++ {
 		updated := textAmpRe.ReplaceAllStringFunc(expr, func(m string) string {
-			if strings.Contains(m, `\&`) {
-				return m
+			var b strings.Builder
+			b.Grow(len(m) + 4)
+			for i := 0; i < len(m); i++ {
+				if m[i] == '&' && (i == 0 || m[i-1] != '\\') {
+					b.WriteString(`\&`)
+				} else {
+					b.WriteByte(m[i])
+				}
 			}
-			return strings.ReplaceAll(m, "&", `\&`)
+			return b.String()
 		})
 		if updated == expr {
 			break
@@ -372,7 +378,7 @@ func (p *mathInlineParser) Parse(parent ast.Node, block text.Reader, pc parser.C
 	// 2. Handle $...$ and $$...$$ when not preceded by backslash or alphanumeric character
 	if line[0] == '$' {
 		prec := block.PrecendingCharacter()
-		if prec == '\\' || (prec < 128 && isASCIIAlphaNum(byte(prec))) {
+		if prec == '\\' || (prec >= 0 && prec < 128 && isASCIIAlphaNum(byte(prec))) {
 			return nil
 		}
 
@@ -462,7 +468,7 @@ func (r *ghostbookASTHTMLRenderer) renderSafeRawHTML(w util.BufWriter, source []
 		if strings.HasPrefix(lower, "<br") {
 			_, _ = w.WriteString("<br>")
 		} else {
-			_, _ = w.WriteString(strings.ReplaceAll(lower, " ", ""))
+			_, _ = w.WriteString(strings.NewReplacer(" ", "", "\t", "", "\n", "", "\r", "").Replace(lower))
 		}
 	}
 	return ast.WalkSkipChildren, nil
@@ -585,7 +591,7 @@ func RenderMarkdownToHTML(md string) (template.HTML, string, []string, int32, er
 	}
 	rawHTML := buf.String()
 
-	// Normalize relative Markdown chapter links (e.g. href="04-lockin-before-buyout.md") to /chapters/<slug>
+	// Normalize relative Markdown chapter links (e.g. href="01-system-architecture.md") to /chapters/<slug>
 	rawHTML = relativeMDLinkRe.ReplaceAllString(rawHTML, `href="/chapters/$1$2"`)
 
 	words := int32(len(strings.Fields(md)))

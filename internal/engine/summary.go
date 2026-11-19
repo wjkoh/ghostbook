@@ -11,8 +11,7 @@ import (
 )
 
 func (e *BookEngine) parseOrderedChapterEntriesLocked() ([]renderer.SummaryEntry, string, error) {
-	summaryPath := filepath.Join(e.repoDir, "src", "SUMMARY.md")
-	rawSummary, err := os.ReadFile(summaryPath)
+	rawSummary, err := e.readSrcFileSafe("SUMMARY.md")
 	if err != nil {
 		return nil, "", fmt.Errorf("read SUMMARY.md: %w", err)
 	}
@@ -68,9 +67,10 @@ func formatInitialChapterBody(title, initialMarkdown string) string {
 
 func insertChildSummaryEntry(summaryStr, entryLine, cleanParent string) (string, bool) {
 	parentTarget := "(" + cleanParent + ".md)"
+	parentRelTarget := "(./" + cleanParent + ".md)"
 	lines := strings.Split(summaryStr, "\n")
 	for idx, line := range lines {
-		if !strings.Contains(line, parentTarget) {
+		if !strings.Contains(line, parentTarget) && !strings.Contains(line, parentRelTarget) {
 			continue
 		}
 		indent := ""
@@ -103,15 +103,25 @@ func insertChildSummaryEntry(summaryStr, entryLine, cleanParent string) (string,
 func insertPartSummaryEntry(summaryStr, entryLine, cleanPart string) string {
 	lines := strings.Split(summaryStr, "\n")
 	partIdx := -1
+	substringIdx := -1
 	for idx, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
 			headingText := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
-			if strings.EqualFold(headingText, cleanPart) || strings.Contains(strings.ToLower(headingText), strings.ToLower(cleanPart)) {
+			if strings.EqualFold(headingText, "Summary") {
+				continue
+			}
+			if strings.EqualFold(headingText, cleanPart) {
 				partIdx = idx
 				break
 			}
+			if substringIdx < 0 && strings.Contains(strings.ToLower(headingText), strings.ToLower(cleanPart)) {
+				substringIdx = idx
+			}
 		}
+	}
+	if partIdx < 0 {
+		partIdx = substringIdx
 	}
 	if partIdx >= 0 {
 		insertAt := partIdx + 1
@@ -147,7 +157,7 @@ func sanitizeSummaryTitle(title string) string {
 }
 
 func insertSummaryEntry(summaryStr, title, slug, parentSlug, partTitle string) string {
-	if strings.Contains(summaryStr, "("+slug+".md)") {
+	if strings.Contains(summaryStr, "("+slug+".md)") || strings.Contains(summaryStr, "(./"+slug+".md)") {
 		return summaryStr
 	}
 	entryLine := fmt.Sprintf("- [%s](%s.md)", sanitizeSummaryTitle(title), slug)
@@ -270,8 +280,8 @@ func replaceChapterSlugLinks(text, oldSlug, newSlug string) string {
 			shouldRewrite = true
 		} else {
 			c := after[0]
-			// Rewrite live links (#anchor, ?query, ), ], ", ', whitespace, punctuation) while preserving prefix-sharing slugs (-, alnum) and historical /rev/ permalinks
-			if c == '#' || c == '?' || c == ')' || c == ']' || c == '"' || c == '\'' || c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '.' || c == ',' || c == ';' || c == ':' {
+			// Rewrite live links (#anchor, ?query, ), ], >, ", ', whitespace, punctuation) while preserving prefix-sharing slugs (-, alnum) and historical /rev/ permalinks
+			if c == '#' || c == '?' || c == ')' || c == ']' || c == '>' || c == '"' || c == '\'' || c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '.' || c == ',' || c == ';' || c == ':' {
 				shouldRewrite = true
 			}
 		}
@@ -298,17 +308,18 @@ func (e *BookEngine) rewriteCrossChapterLinksLocked(oldSlug, newSlug string) []s
 		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".md") || ent.Name() == "SUMMARY.md" {
 			continue
 		}
-		full := filepath.Join(e.repoDir, "src", ent.Name())
-		raw, readErr := os.ReadFile(full)
+		raw, readErr := e.readSrcFileSafe(ent.Name())
 		if readErr != nil {
 			continue
 		}
 		orig := string(raw)
 		updated := strings.ReplaceAll(orig, "("+oldSlug+".md)", "("+newSlug+".md)")
 		updated = strings.ReplaceAll(updated, "(./"+oldSlug+".md)", "(./"+newSlug+".md)")
+		updated = strings.ReplaceAll(updated, "("+oldSlug+".md#", "("+newSlug+".md#")
+		updated = strings.ReplaceAll(updated, "(./"+oldSlug+".md#", "(./"+newSlug+".md#")
 		updated = replaceChapterSlugLinks(updated, oldSlug, newSlug)
 		if updated != orig {
-			if os.WriteFile(full, []byte(updated), 0o644) == nil {
+			if writeErr := e.writeSrcFileSafe(ent.Name(), []byte(updated)); writeErr == nil {
 				modifiedRelPaths = append(modifiedRelPaths, filepath.ToSlash(filepath.Join("src", ent.Name())))
 			}
 		}

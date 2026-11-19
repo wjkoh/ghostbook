@@ -93,11 +93,17 @@ func TestReportPlatformFeedback_ValidationAliasesAuditContextAndOfflineResilienc
 	}
 
 	// 3. Offline / Resend HTTP 500 resilience: SQLite persistence still succeeds with EmailNotified=false
+	var failHits int32
 	failSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		failHits++
 		http.Error(w, `{"message":"upstream unavailable"}`, http.StatusInternalServerError)
 	}))
 	defer failSrv.Close()
-	eng.SetAlertNotifier(store.NewAlertNotifier("re_test", failSrv.URL, "https://docs.example.com", 0))
+	eng.SetAlertNotifier(store.NewAlertNotifier("re_test", failSrv.URL, "https://docs.example.com", 0, store.MailConfig{
+		BookTitle:  "Ghostbook",
+		From:       "Ghostbook <ghostbook@example.com>",
+		Recipients: []string{"ops@example.com"},
+	}))
 
 	out2, err := eng.ReportPlatformFeedback(ctx, &engine.ReportPlatformFeedbackInput{
 		Kind:    "", // defaults to feature_request
@@ -108,6 +114,9 @@ func TestReportPlatformFeedback_ValidationAliasesAuditContextAndOfflineResilienc
 	}
 	if out2.EmailNotified {
 		t.Fatalf("expected EmailNotified=false when Resend returns 500")
+	}
+	if failHits != 1 {
+		t.Fatalf("expected mock Resend 500 server to be hit once, got %d", failHits)
 	}
 	rec2, err := st.GetFeedback(ctx, out2.FeedbackID)
 	if err != nil || rec2.Kind != "feature_request" || rec2.ResendMessageID != "" {

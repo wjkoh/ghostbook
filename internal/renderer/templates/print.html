@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">
-  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">
+  <meta name="robots" content="noindex, nofollow, noarchive, noimageindex">
+  <meta name="googlebot" content="noindex, nofollow, noarchive, noimageindex">
   <meta name="referrer" content="no-referrer">
   {{template "agent_discovery_links" .}}
   <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="{{.Book.DisplayTitle}} Full Raw Markdown (book.md)">
@@ -115,11 +115,11 @@
     }
   </style>
 </head>
-<body>
+<body data-markdown-url="{{.MarkdownPath}}">
   <div class="print-toolbar">
     <div>
       <a href="/" class="studio-btn">← Back to Interactive Studio</a>
-      <span style="margin-left:12px;font-size:12.5px;color:#222;">US-Letter Grayscale-Laser-Printer Edition · Revision <strong>r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})</strong> · {{len .Book.Chapters}} Chapters · {{.TotalWords}} Words</span>
+      <span style="margin-left:12px;font-size:12.5px;color:#222;">US-Letter Grayscale-Laser-Printer Edition · Revision <strong>r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})</strong> · {{len .Book.Chapters}} {{if eq (len .Book.Chapters) 1}}Chapter{{else}}Chapters{{end}} · {{.TotalWords}} Words</span>
     </div>
     <div>
       <button class="studio-btn primary" id="btnPrintBook" onclick="window.print()">⎙ Print / Save as US-Letter PDF</button>
@@ -127,10 +127,10 @@
   </div>
   <main class="print-container">
     <section class="print-cover book-prose">
-      <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:8px;">SINGLE SOURCE OF TRUTH</div>
+      <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:8px;">{{.Book.DisplayKicker}}</div>
       <h1 style="font-size:32px;margin-bottom:12px;">{{.Book.DisplayTitle}}</h1>
-      {{if .Book.Authors}}<p style="font-size:15px;color:#111;">Co-Authors: {{range $i, $a := .Book.Authors}}{{if $i}} · {{end}}{{$a.DisplayName}} ({{$a.Email}}){{end}}</p>{{end}}
-      <p style="font-size:12.5px;color:#222;">Compiled from Git Revision <strong>r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})</strong> · {{len .Book.Chapters}} Chapters ({{.TotalWords}} Words) · Formatted for US Letter (8.5in × 11.0in) Monochrome Laser Printing</p>
+      {{if .Book.Authors}}<p style="font-size:15px;color:#111;">{{if eq (len .Book.Authors) 1}}Author{{else}}Co-Authors{{end}}: {{range $i, $a := .Book.Authors}}{{if $i}} · {{end}}{{$a.DisplayName}}{{if $a.Email}} ({{$a.Email}}){{end}}{{end}}</p>{{end}}
+      <p style="font-size:12.5px;color:#222;">Compiled from Git Revision <strong>r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})</strong> · {{len .Book.Chapters}} {{if eq (len .Book.Chapters) 1}}Chapter{{else}}Chapters{{end}} ({{.TotalWords}} Words) · Formatted for US Letter (8.5in × 11.0in) Monochrome Laser Printing</p>
     </section>
 
     <section class="print-toc book-prose" id="printToc">

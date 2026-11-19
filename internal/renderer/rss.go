@@ -138,7 +138,7 @@ func RenderTimelineRSS(book *RenderedBook, baseURL string) ([]byte, error) {
 	}
 
 	items := make([]rssItem, 0, len(entries))
-	for _, m := range entries {
+	for idx, m := range entries {
 		revLabel := formatTimelineRevisionRange(m.StartRevision, m.EndRevision)
 		title := strings.TrimSpace(m.Title)
 		if title == "" {
@@ -150,7 +150,11 @@ func RenderTimelineRSS(book *RenderedBook, baseURL string) ([]byte, error) {
 
 		itemLink := base + "/timeline"
 		if m.EndRevision > 0 {
-			itemLink = fmt.Sprintf("%s/timeline#milestone-r%d", base, m.EndRevision)
+			if idx >= FrontPageTimelineLimit {
+				itemLink = fmt.Sprintf("%s/timeline?all=1#milestone-r%d", base, m.EndRevision)
+			} else {
+				itemLink = fmt.Sprintf("%s/timeline#milestone-r%d", base, m.EndRevision)
+			}
 		} else if m.EndCommitSHA != "" {
 			itemLink = fmt.Sprintf("%s/rev/%s", base, m.EndCommitSHA)
 		}

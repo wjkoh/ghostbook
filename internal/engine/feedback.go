@@ -158,11 +158,16 @@ func (e *BookEngine) ReportPlatformFeedback(ctx context.Context, in *ReportPlatf
 		}
 	}
 
+	confAuthor := submittedBy
+	if confAuthor == "" {
+		confAuthor = author.ID
+	}
+
 	return &ReportPlatformFeedbackOutput{
 		FeedbackID:    saved.ID,
 		RecordedAtISO: saved.CreatedAtISO,
 		SubmittedBy:   submittedBy,
 		EmailNotified: emailNotified,
-		Confirmation:  fmt.Sprintf("Recorded %s %s #%d from %s.", e.BookTitle(), saved.Kind, saved.ID, author.DisplayName),
+		Confirmation:  fmt.Sprintf("Recorded %s %s #%d from %s.", e.BookTitle(), saved.Kind, saved.ID, confAuthor),
 	}, nil
 }

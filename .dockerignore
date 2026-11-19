@@ -1,0 +1,12 @@
+.git/
+bin/
+dist/
+data/
+docs/screenshots/
+*.db
+*.db-shm
+*.db-wal
+.env
+*.env
+coverage.out
+.DS_Store

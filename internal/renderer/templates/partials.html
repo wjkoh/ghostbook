@@ -10,13 +10,16 @@
 {{end}}
 
 {{define "machine_discovery_meta"}}
-  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">
-  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">
+  <meta name="robots" content="noindex, nofollow, noarchive, noimageindex">
+  <meta name="googlebot" content="noindex, nofollow, noarchive, noimageindex">
   <meta name="referrer" content="no-referrer">
   {{template "agent_discovery_links" .}}
   <script>
     (function() {
-      var pref = localStorage.getItem('ghostbook_theme') || 'system';
+      var pref = 'system';
+      try {
+        pref = localStorage.getItem('ghostbook_theme') || 'system';
+      } catch (_) {}
       var resolved = pref === 'system'
         ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
         : pref;

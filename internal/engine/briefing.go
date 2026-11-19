@@ -154,8 +154,9 @@ func computePendingTimelineWindow(headRev int32, state *store.TimelineStateRecor
 }
 
 func extractSrcSlugFromDiffHeader(headerLine string) string {
-	for _, token := range strings.Fields(headerLine) {
-		for _, prefix := range []string{"b/src/", "a/src/", "src/"} {
+	fields := strings.Fields(headerLine)
+	for _, prefix := range []string{"b/src/", "a/src/", "src/"} {
+		for _, token := range fields {
 			if strings.HasPrefix(token, prefix) && strings.HasSuffix(token, ".md") {
 				return strings.TrimSuffix(strings.TrimPrefix(token, prefix), ".md")
 			}
@@ -164,13 +165,37 @@ func extractSrcSlugFromDiffHeader(headerLine string) string {
 	return ""
 }
 
+func splitUnifiedDiffBlocks(fullPatch string) []string {
+	var blocks []string
+	var cur strings.Builder
+	inBlock := false
+	for _, line := range strings.Split(fullPatch, "\n") {
+		if strings.HasPrefix(line, "diff --git ") {
+			if inBlock {
+				blocks = append(blocks, cur.String())
+				cur.Reset()
+			}
+			inBlock = true
+		}
+		if inBlock {
+			if cur.Len() > 0 {
+				cur.WriteByte('\n')
+			}
+			cur.WriteString(line)
+		}
+	}
+	if inBlock && cur.Len() > 0 {
+		blocks = append(blocks, cur.String())
+	}
+	return blocks
+}
+
 func summarizeCommitPatchForPrompt(fullPatch string, activeBySlug map[string]*renderer.ChapterView) ([]string, string) {
 	var slugs []string
 	seenSlug := make(map[string]bool)
 	var diffLines []string
 
-	chunks := strings.Split(fullPatch, "diff --git ")
-	for _, rawChunk := range chunks {
+	for _, rawChunk := range splitUnifiedDiffBlocks(fullPatch) {
 		if strings.TrimSpace(rawChunk) == "" {
 			continue
 		}
@@ -372,12 +397,27 @@ func (e *BookEngine) SynthesizeBriefingIfNeeded(ctx context.Context) ([]store.Ti
 	e.briefMu.Lock()
 	defer e.briefMu.Unlock()
 
+	// Snapshot the target HEAD revision once before looping so commits arriving mid-synthesis
+	// wait cleanly for the next debounced session pass instead of bypassing the debounce window.
+	var targetHeadRev int32
+	if snap := e.CurrentSnapshot(); snap != nil {
+		targetHeadRev = snap.HeadRevisionNumber
+	}
+
 	var latestEntries []store.TimelineEntryRecord
 	for pass := 0; pass < 16; pass++ {
 		start := time.Now()
 		state, err := e.store.GetEditorialTimelineState(ctx)
 		if err != nil {
 			return latestEntries, err
+		}
+		if targetHeadRev > 0 && state != nil && state.LastHeadRevision >= targetHeadRev {
+			allExisting, lErr := e.store.ListEditorialTimelineEntries(ctx, 0)
+			if lErr != nil {
+				return latestEntries, lErr
+			}
+			e.attachTimelineToCurrentSnapshot(allExisting, state)
+			return allExisting, nil
 		}
 		priorTop, _ := e.store.ListEditorialTimelineEntries(ctx, 2)
 
@@ -390,9 +430,10 @@ func (e *BookEngine) SynthesizeBriefingIfNeeded(ctx context.Context) ([]store.Ti
 		if batchIn == nil {
 			if state != nil {
 				allExisting, lErr := e.store.ListEditorialTimelineEntries(ctx, 0)
-				if lErr == nil {
-					e.attachTimelineToCurrentSnapshot(allExisting, state)
+				if lErr != nil {
+					return latestEntries, lErr
 				}
+				e.attachTimelineToCurrentSnapshot(allExisting, state)
 				return allExisting, nil
 			}
 			return latestEntries, nil
@@ -451,6 +492,9 @@ func (e *BookEngine) SynthesizeBriefingIfNeeded(ctx context.Context) ([]store.Ti
 			"model", res.ModelName,
 			"duration_ms", time.Since(start).Milliseconds(),
 		)
+		if targetHeadRev > 0 && batchEndRev >= targetHeadRev {
+			break
+		}
 	}
 	return latestEntries, nil
 }
