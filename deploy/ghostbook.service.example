@@ -1,0 +1,32 @@
+[Unit]
+Description=Ghostbook Collaborative Book Authoring Studio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ghostbook
+Group=ghostbook
+WorkingDirectory=/var/lib/ghostbook
+EnvironmentFile=-/etc/ghostbook/env
+ExecStart=/usr/local/bin/ghostbook \
+  --addr=127.0.0.1:8090 \
+  --pprof-addr=127.0.0.1:6060 \
+  --data-dir=/var/lib/ghostbook/data \
+  --base-url=https://book.example.com \
+  --book-title="Engineering Handbook" \
+  --book-kicker="Living Book" \
+  --mcp-name="engineering-handbook" \
+  --authors-file=/etc/ghostbook/authors.json \
+  --allowed-hosts=book.example.com \
+  --sync-interval=60s
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ghostbook
+
+[Install]
+WantedBy=multi-user.target

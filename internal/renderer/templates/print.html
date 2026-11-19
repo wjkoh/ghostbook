@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">
+  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">
+  <meta name="referrer" content="no-referrer">
+  {{template "agent_discovery_links" .}}
+  <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="{{.Book.DisplayTitle}} Full Raw Markdown (book.md)">
+  <meta name="markdown-url" content="{{.MarkdownPath}}">
+  {{.JSONLDDiscovery}}
+  <title>{{.Book.DisplayTitle}} (US-Letter Print Deliverable)</title>
+  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+  <style>{{studioCSS}}</style>
+  <style>
+    @page {
+      size: letter;
+      margin: 0.7in 0.75in;
+    }
+    body {
+      background: #ffffff;
+      color: #000000;
+    }
+    .print-toolbar {
+      position: sticky;
+      top: 0;
+      background: #f7f6f2;
+      border-bottom: 1px solid #cccccc;
+      padding: 10px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 20;
+    }
+    .print-container {
+      max-width: 7.0in;
+      margin: 0 auto;
+      padding: 36px 0 72px;
+    }
+    .print-cover {
+      padding: 40px 0 32px;
+      border-bottom: 2px solid #000000;
+      margin-bottom: 32px;
+    }
+    .print-toc {
+      padding: 0 0 32px;
+      border-bottom: 1.5px solid #000000;
+      margin-bottom: 40px;
+    }
+    .print-toc-list {
+      list-style: none;
+      padding: 0;
+      margin: 12px 0 0;
+    }
+    .print-toc-part {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+      font-size: 11.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #000000;
+      margin: 18px 0 6px;
+      padding-left: 8px;
+      border-left: 2.5px solid #000000;
+    }
+    .print-toc-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 4px 0;
+      border-bottom: 1px dotted #cccccc;
+      font-size: 14px;
+    }
+    .print-toc-item.depth-1 {
+      padding-left: 20px;
+      font-size: 13px;
+    }
+    .print-toc-item.depth-2, .print-toc-item.depth-3 {
+      padding-left: 36px;
+      font-size: 12.5px;
+    }
+    .print-toc-item a {
+      color: #000000;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .print-toc-meta {
+      font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: #222222;
+      white-space: nowrap;
+      margin-left: 12px;
+    }
+    .print-chapter {
+      margin-bottom: 48px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid #dddddd;
+    }
+    .print-part-header {
+      margin: 36px 0 24px;
+      padding: 10px 14px;
+      border-left: 3px solid #000000;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #000000;
+    }
+    @media print {
+      .print-toolbar { display: none !important; }
+      .print-container { max-width: 100%; padding: 0; }
+      .print-chapter { page-break-before: always; break-before: page; border-bottom: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-toolbar">
+    <div>
+      <a href="/" class="studio-btn">← Back to Interactive Studio</a>
+      <span style="margin-left:12px;font-size:12.5px;color:#222;">US-Letter Grayscale-Laser-Printer Edition · Revision <strong>r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})</strong> · {{len .Book.Chapters}} Chapters · {{.TotalWords}} Words</span>
+    </div>
+    <div>
+      <button class="studio-btn primary" id="btnPrintBook" onclick="window.print()">⎙ Print / Save as US-Letter PDF</button>
+    </div>
+  </div>
+  <main class="print-container">
+    <section class="print-cover book-prose">
+      <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:8px;">SINGLE SOURCE OF TRUTH</div>
+      <h1 style="font-size:32px;margin-bottom:12px;">{{.Book.DisplayTitle}}</h1>
+      {{if .Book.Authors}}<p style="font-size:15px;color:#111;">Co-Authors: {{range $i, $a := .Book.Authors}}{{if $i}} · {{end}}{{$a.DisplayName}} ({{$a.Email}}){{end}}</p>{{end}}
+      <p style="font-size:12.5px;color:#222;">Compiled from Git Revision <strong>r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})</strong> · {{len .Book.Chapters}} Chapters ({{.TotalWords}} Words) · Formatted for US Letter (8.5in × 11.0in) Monochrome Laser Printing</p>
+    </section>
+
+    <section class="print-toc book-prose" id="printToc">
+      <h2 style="margin-top:0;font-size:18px;">Table of Contents</h2>
+      <ul class="print-toc-list">
+        {{range .Book.Chapters}}
+        {{if .StartsNewPart}}
+        <li class="print-toc-part">{{sidebarPartTitle .PartTitle}}</li>
+        {{end}}
+        <li class="print-toc-item {{if gt .Depth 0}}depth-{{.Depth}}{{end}}">
+          <a href="#print-{{.Slug}}">{{sidebarChapterTitle .Title}}</a>
+          <span class="print-toc-meta">r{{.RevisionNumber}} ({{.LastCommitSHA}}) · {{.WordCount}} words</span>
+        </li>
+        {{end}}
+      </ul>
+    </section>
+
+    {{range .Book.Chapters}}
+    {{if .StartsNewPart}}
+    <div class="print-part-header">{{.PartTitle}}</div>
+    {{end}}
+    <section class="print-chapter book-prose" id="print-{{.Slug}}">
+      {{.RenderedHTML}}
+    </section>
+    {{end}}
+  </main>
+  <script src="/static/vendor/katex/katex.min.js"></script>
+  <script src="/static/vendor/katex/auto-render.min.js"></script>
+  <script src="/static/vendor/mermaid/mermaid.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      if (window.renderMathInElement) {
+        renderMathInElement(document.body, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '\\[', right: '\\]', display: true}
+          ],
+          throwOnError: false
+        });
+      }
+      if (window.mermaid) {
+        window.mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' });
+        const nodes = Array.from(document.querySelectorAll('.mermaid-container .mermaid'));
+        if (nodes.length > 0 && typeof window.mermaid.run === 'function') {
+          try { await window.mermaid.run({ nodes }); } catch (_) {}
+        }
+      }
+    });
+  </script>
+</body>
+</html>

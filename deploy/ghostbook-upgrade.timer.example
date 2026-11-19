@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily maintenance window check for staged Ghostbook binary upgrades
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

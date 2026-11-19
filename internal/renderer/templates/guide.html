@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Co-Author AI Setup Guide · {{.Book.DisplayTitle}}</title>
+  {{template "machine_discovery_meta" .}}
+  <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="Co-Author AI Setup Guide (Raw Markdown)">
+  <meta name="markdown-url" content="{{.MarkdownPath}}">
+  {{.JSONLDDiscovery}}
+  <style>{{studioCSS}}</style>
+</head>
+<body data-base-url="{{.BaseURL}}" data-mcp-name="{{.Book.DisplayMCPName}}" data-markdown-url="{{.MarkdownPath}}">
+<div class="layout-shell">
+  {{template "sidebar" .}}
+
+  <div class="main-column">
+    <header class="studio-topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="sidebarToggleBtn" onclick="toggleSidebar()" title="Toggle Table of Contents">☰ Contents</button>
+        <a href="/" class="studio-btn">← Back to Reader</a>
+      </div>
+      <div class="topbar-right">
+        {{template "theme_select" .}}
+      </div>
+    </header>
+
+    <main class="chapter-container">
+      <article class="book-prose guide-prose">
+        <h1>Co-Author AI Setup Guide</h1>
+        <p><strong>{{.Book.DisplayTitle}}</strong> is a Git-backed living book where humans read on the web and AI agents do all the writing. Connect <strong>Claude</strong>, <strong>ChatGPT</strong>, <strong>Gemini</strong>, or any MCP-compatible client below to read chapters, search across the book, leave inline editorial callouts, and commit surgical edits under your name.</p>
+
+        <blockquote>
+          <p><strong>Where to Find Your Personal <code>&lt;secret-key&gt;</code>:</strong> Ask your book administrator for your personalized <code>/u/&lt;email&gt;:&lt;secret-key&gt;/guide</code> invite link (or run <code>ghostbook authors list</code> on the server). Opening that link fills your <code>&lt;secret-key&gt;</code> into memory for the copy boxes below and scrubs it from the browser address bar.</p>
+        </blockquote>
+
+        {{if .Book.Authors}}
+        <div class="guide-profile-bar" role="group" aria-label="Select Your Co-Author Profile">
+          <div class="guide-profile-label">1. Select Your Co-Author Profile (or open your personalized setup link to auto-fill <code>&lt;secret-key&gt;</code>):</div>
+          <div class="guide-profile-pills">
+            {{range $i, $a := .Book.Authors}}
+            <button class="profile-pill-btn{{if eq $i 0}} active{{end}}" data-author-id="{{$a.ID}}" data-author-email="{{$a.Email}}" data-author-name="{{$a.DisplayName}}" onclick="selectGuideProfile(this.dataset.authorEmail, this.dataset.authorName, null, this.dataset.authorId)">{{$a.DisplayName}}</button>
+            {{end}}
+          </div>
+        </div>
+        {{end}}
+
+        <!-- 1. CLAUDE APP -->
+        <div class="guide-card">
+          <h2>Option A: Claude Desktop &amp; Claude Web App (claude.ai)</h2>
+          <p>Claude supports native remote MCP connectors with zero local installation. Your <code>&lt;email&gt;:&lt;secret-key&gt;</code> in the URL path authenticates you as <strong id="labelAuthorClaude">Co-Author</strong>.</p>
+          <ol>
+            <li>Open <strong>Claude Desktop</strong> or <strong><a href="https://claude.ai" target="_blank" rel="noopener">claude.ai</a></strong> and go to <strong>Settings → Integrations (or Connectors) → Add Custom Connector</strong>.</li>
+            <li>Set <strong>Name</strong> to <strong>{{.Book.DisplayTitle}}</strong>.</li>
+            <li>Paste your personal <strong>Remote MCP Server URL</strong> below and leave Authentication set to <strong>None</strong>:</li>
+          </ol>
+          <div class="copy-row">
+            <div class="copy-code-box" id="claudeMcpUrl">{{.BaseURL}}/u/you@example.com:&lt;secret-key&gt;/mcp</div>
+            <button class="studio-btn primary" onclick="copyTextFrom('claudeMcpUrl', this)">Copy MCP URL</button>
+          </div>
+          <p class="guide-helper-label"><strong>Using Claude Code CLI in Terminal?</strong> Run this single command:</p>
+          <div class="copy-row">
+            <div class="copy-code-box" id="claudeCliCmd">claude mcp add --transport http {{.Book.DisplayMCPName}} {{.BaseURL}}/u/you@example.com:&lt;secret-key&gt;/mcp</div>
+            <button class="studio-btn" onclick="copyTextFrom('claudeCliCmd', this)">Copy Command</button>
+          </div>
+        </div>
+
+        <!-- 2. CHATGPT APP -->
+        <div class="guide-card">
+          <h2>Option B: ChatGPT Desktop &amp; ChatGPT Web App (chatgpt.com)</h2>
+          <p>ChatGPT supports remote MCP connectors directly inside the standard conversation window.</p>
+          <ol>
+            <li>Open <strong>ChatGPT</strong> and navigate to <strong>Settings → Connectors → Add Custom Connector (MCP)</strong> (enable <em>Developer Mode</em> if prompted).</li>
+            <li>Set <strong>Name</strong> to <strong>{{.Book.DisplayTitle}}</strong> and <strong>Authentication</strong> to <strong>None</strong>.</li>
+            <li>Paste your personal <strong>MCP Server URL</strong>:</li>
+          </ol>
+          <div class="copy-row">
+            <div class="copy-code-box" id="chatgptMcpUrl">{{.BaseURL}}/u/you@example.com:&lt;secret-key&gt;/mcp</div>
+            <button class="studio-btn primary" onclick="copyTextFrom('chatgptMcpUrl', this)">Copy MCP URL</button>
+          </div>
+        </div>
+
+        <!-- 3. GEMINI / GENERIC MCP JSON -->
+        <div class="guide-card">
+          <h2>Option C: Gemini Web App &amp; MCP JSON Clients (Cursor, Windsurf, CLI)</h2>
+          <p><strong>Gemini Web App:</strong> Navigate to <strong>Settings → Connected Apps → Add custom app link</strong> and paste your personal <strong>MCP Server URL</strong>:</p>
+          <div class="copy-row">
+            <div class="copy-code-box" id="geminiWebMcpUrl">{{.BaseURL}}/u/you@example.com:&lt;secret-key&gt;/mcp</div>
+            <button class="studio-btn primary" onclick="copyTextFrom('geminiWebMcpUrl', this)">Copy MCP URL</button>
+          </div>
+          <p class="guide-helper-label"><strong>Using a local MCP JSON config?</strong> Add this block to your client's <code>mcp_config.json</code>:</p>
+          <div class="copy-row">
+            <div class="copy-code-box" id="geminiJsonConfig">{
+  "mcpServers": {
+    "{{.Book.DisplayMCPName}}": {
+      "serverUrl": "{{.BaseURL}}/u/you@example.com:&lt;secret-key&gt;/mcp"
+    }
+  }
+}</div>
+            <button class="studio-btn" onclick="copyTextFrom('geminiJsonConfig', this)">Copy JSON</button>
+          </div>
+        </div>
+
+        <!-- 4. INLINE EDITORIAL COMMENTS & TODO CALLOUTS -->
+        <h2>Inline Editorial Comments &amp; TODO Callouts (Pure-Git Workflow)</h2>
+        <p>To keep 100% of editorial state inside Git, write review questions and open action items directly in chapter Markdown using blockquote callouts via <code>patch_chapter</code>:</p>
+        <blockquote>
+          <p><strong>[TODO · Alice Chen · 2026-11-18]:</strong> Add concrete latency numbers and benchmarks for Section 2 before final sign-off.</p>
+        </blockquote>
+        <blockquote>
+          <p><strong>[Comment · Bob Rivera · 2026-11-18]:</strong> Should we split the migration checklist into a standalone appendix?</p>
+        </blockquote>
+        <p>When a <code>[TODO]</code> or <code>[Comment]</code> is resolved, ask your AI agent to update the prose and remove the blockquote in the same <code>patch_chapter</code> commit so full discussion history stays preserved in Git.</p>
+
+        <!-- 4B. PLATFORM BUGS & FEATURE REQUESTS -->
+        <h2>Reporting Platform Bugs &amp; Requesting Features</h2>
+        <p>Whenever your AI agent hits tool friction or you want a new capability for the book server or MCP tools, tell your agent inside chat:</p>
+        <ul>
+          <li><strong>Bug Report:</strong> <em>“Report a platform bug: [what happened]”</em></li>
+          <li><strong>Feature Request:</strong> <em>“Request a platform feature: [what would make editing easier]”</em></li>
+        </ul>
+        <p>Your agent invokes <code>report_platform_feedback</code>, persists the ticket in SQLite along with recent tool context, and optionally emails the maintainer if Resend alerts are configured.</p>
+
+        <!-- 5. READY-TO-PASTE STARTER PROMPTS -->
+        <h2>Ready-to-Paste Prompts for Your AI Assistant</h2>
+        <p>Once connected, paste any of these prompts into your chat:</p>
+
+        <div class="prompt-card">
+          <div class="prompt-text" id="prompt1">“Read the table of contents and Chapter 1, then summarize the key claims and any gaps we should tighten.”</div>
+          <button class="studio-btn" onclick="copyTextFrom('prompt1', this)">Copy Prompt</button>
+        </div>
+
+        <div class="prompt-card">
+          <div class="prompt-text" id="prompt2">“Search the book for ‘TODO’ to list all open action items across chapters and help me draft resolutions.”</div>
+          <button class="studio-btn" onclick="copyTextFrom('prompt2', this)">Copy Prompt</button>
+        </div>
+
+        <div class="prompt-card">
+          <div class="prompt-text" id="prompt3">“Read Chapter 2 and surgically patch Section 2 to clarify the workflow, or insert an inline [Comment] blockquote if we need co-author sign-off first.”</div>
+          <button class="studio-btn" onclick="copyTextFrom('prompt3', this)">Copy Prompt</button>
+        </div>
+
+        <div class="prompt-card">
+          <div class="prompt-text" id="prompt4">“List the recent Git changes across the book and show me the unified diff of the latest commit.”</div>
+          <button class="studio-btn" onclick="copyTextFrom('prompt4', this)">Copy Prompt</button>
+        </div>
+
+        <!-- 6. ALL 13 TOOLS TABLE -->
+        <h2>Complete Reference: All 13 MCP Tools</h2>
+        <div class="table-scroll-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>MCP Tool Name</th>
+              <th>What It Does</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>get_table_of_contents</strong></td>
+              <td>Returns <code>SUMMARY.md</code>, chapter word counts, last author, and live + permalink URLs.</td>
+            </tr>
+            <tr>
+              <td><strong>read_chapter</strong></td>
+              <td>Reads the full Markdown text (including any inline <code>[TODO]</code> or <code>[Comment]</code> callouts), revision SHA/number (<code>r1..rN</code>), and lifecycle lineage status of any chapter, <code>SUMMARY</code>, or <code>STYLE_GUIDE</code>.</td>
+            </tr>
+            <tr>
+              <td><strong>search_book</strong></td>
+              <td>Searches all chapters (or a single <code>slug</code>) via SQLite FTS5 BM25 ranking plus exact line-level substring matching, returning highlighted snippets and 1-based <code>line_matches</code>.</td>
+            </tr>
+            <tr>
+              <td><strong>patch_chapter</strong></td>
+              <td>Applies a surgical search-and-replace edit (or multi-hunk <code>patches</code> array), auto-syncs H1 titles to <code>SUMMARY.md</code>, commits to Git under your name/email, and pushes to the remote repo.</td>
+            </tr>
+            <tr>
+              <td><strong>create_chapter</strong></td>
+              <td>Creates a new chapter or appendix file, appends it to <code>SUMMARY.md</code>, commits to Git, and indexes it in FTS5.</td>
+            </tr>
+            <tr>
+              <td><strong>rename_chapter</strong></td>
+              <td>Moves or renames a chapter slug and/or H1 title, updating <code>SUMMARY.md</code> and cross-chapter links in one Git commit.</td>
+            </tr>
+            <tr>
+              <td><strong>delete_chapter</strong></td>
+              <td>Removes a chapter from <code>SUMMARY.md</code> while preserving its historical revision permalinks and optional replacement link.</td>
+            </tr>
+            <tr>
+              <td><strong>list_recent_changes</strong></td>
+              <td>Lists chronological Git commits (with <code>r1..rN</code> revision numbers) across the book or filtered to a single chapter.</td>
+            </tr>
+            <tr>
+              <td><strong>get_commit_diff</strong></td>
+              <td>Returns the exact unified Markdown diff (<code>+</code> / <code>-</code> lines) for any Git commit SHA or revision range.</td>
+            </tr>
+            <tr>
+              <td><strong>get_chapter_blame</strong></td>
+              <td>Computes section-by-section Git blame showing which co-author last edited each heading block.</td>
+            </tr>
+            <tr>
+              <td><strong>revert_chapter_revision</strong></td>
+              <td>Restores a chapter (including deleted chapters) to a prior commit SHA or revision number via a forward Git commit.</td>
+            </tr>
+            <tr>
+              <td><strong>list_agent_activity</strong></td>
+              <td>Lists recent MCP and ConnectRPC tool calls from the audit log.</td>
+            </tr>
+            <tr>
+              <td><strong>report_platform_feedback</strong></td>
+              <td>Submits a bug report, UX friction note, or feature request with recent tool context.</td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+
+        <p class="guide-footnote" id="guideOpenApiFootnote">
+          <strong>HTTP / OpenAPI 3.1 Reference:</strong> Building custom scripts or curl automation? Browse the <a href="/api-docs">API Reference</a> or fetch the machine-readable <a href="/openapi.json"><code>/openapi.json</code></a> schema (mirrors all 13 MCP tools 1-for-1).
+        </p>
+      </article>
+    </main>
+  </div>
+</div>
+
+<script>{{studioJS}}</script>
+<script>{{guideJS}}</script>
+</body>
+</html>

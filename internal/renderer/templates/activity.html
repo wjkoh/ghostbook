@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Tool Audit Log · {{.Book.DisplayTitle}}</title>
+  {{template "machine_discovery_meta" .}}
+  <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="Agent Tool Audit Log (Raw Markdown)">
+  <meta name="markdown-url" content="{{.MarkdownPath}}">
+  {{.JSONLDDiscovery}}
+  <style>{{studioCSS}}</style>
+</head>
+<body data-markdown-url="{{.MarkdownPath}}">
+<div class="layout-shell">
+  {{template "sidebar" .}}
+  <div class="main-column">
+    <header class="studio-topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="sidebarToggleBtn" onclick="toggleSidebar()" title="Toggle Table of Contents">☰ Contents</button>
+        <a href="/timeline" class="studio-btn">← Timeline</a>
+        <a href="/changelog" class="studio-btn">Git Commit Log</a>
+      </div>
+      <div class="topbar-right">
+        {{template "theme_select" .}}
+      </div>
+    </header>
+
+    <main class="chapter-container wide-ledger-container">
+      <article class="book-prose" id="ssrActivityRoot">
+        <h1>Agent Tool Audit Log</h1>
+        <p class="home-lead">Immutable SQLite WAL audit trail of authenticated MCP and ConnectRPC tool invocations across Claude, ChatGPT, and Antigravity.</p>
+
+        {{if .Entries}}
+        <div class="table-scroll-wrap">
+        <table id="ssrActivityTable" class="ledger-table">
+          <thead>
+            <tr>
+              <th>Timestamp (UTC)</th>
+              <th>Author</th>
+              <th>Protocol &amp; Tool</th>
+              <th>Target</th>
+              <th>Status</th>
+              <th>Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Entries}}
+            <tr>
+              <td style="white-space:nowrap;" title="{{.TimestampISO}}">{{formatTimestamp .TimestampISO}}</td>
+              <td><strong>{{.AuthorID}}</strong></td>
+              <td><span class="rev-pill">{{.Protocol}}</span> <code>{{.ToolName}}</code></td>
+              <td>{{if .ChapterSlug}}{{.ChapterSlug}}{{else}}—{{end}}{{if .GitCommitSHA}} <span class="rev-pill">{{.GitCommitSHA}}</span>{{end}}</td>
+              <td>{{.Status}}</td>
+              <td style="white-space:nowrap;">{{.DurationMs}} ms</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        </div>
+        {{else}}
+        <div class="studio-card">No agent tool invocations recorded yet.</div>
+        {{end}}
+      </article>
+    </main>
+  </div>
+</div>
+<script>{{studioJS}}</script>
+</body>
+</html>

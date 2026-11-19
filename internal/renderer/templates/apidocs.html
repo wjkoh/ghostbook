@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0" />
+  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0" />
+  <meta name="referrer" content="no-referrer" />
+  {{template "agent_discovery_links" .}}
+  <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="Co-Author AI &amp; API Setup Guide (Raw Markdown)">
+  <link rel="alternate" type="application/vnd.oai.openapi+json" href="/openapi.json" title="OpenAPI 3.1 JSON Specification">
+  <meta name="markdown-url" content="{{.MarkdownPath}}">
+  {{.JSONLDDiscovery}}
+  <title>API Reference (Scalar OpenAPI {{.SpecVersion}}) · {{.DisplayBookTitle}}</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    }
+    .ghostbook-api-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: #111111;
+      color: #ffffff;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #2e2e2e;
+      font-size: 13px;
+    }
+    .ghostbook-api-header-left, .ghostbook-api-header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .ghostbook-api-brand {
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #ffffff;
+      text-decoration: none;
+    }
+    .ghostbook-api-link {
+      color: #e5e5e5;
+      text-decoration: none;
+      background: #222222;
+      border: 1px solid #3a3a3a;
+      padding: 5px 11px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .ghostbook-api-link:hover {
+      background: #333333;
+      color: #ffffff;
+    }
+  </style>
+</head>
+<body>
+  <header class="ghostbook-api-header">
+    <div class="ghostbook-api-header-left">
+      <a href="/" class="ghostbook-api-link">← Back to Book Reader</a>
+      <span class="ghostbook-api-brand">{{.DisplayBookTitle}} · Interactive API Reference (Scalar · OpenAPI {{.SpecVersion}})</span>
+    </div>
+    <div class="ghostbook-api-header-right">
+      <a href="/guide" class="ghostbook-api-link">Co-Author AI Setup Guide</a>
+      <a href="/openapi.json" class="ghostbook-api-link" target="_blank" rel="noopener">Raw /openapi.json</a>
+    </div>
+  </header>
+
+  <div id="openapi-viewer-mount"></div>
+
+  <script src="/static/vendor/openapi/scalar-api-reference.min.js"></script>
+  <script>
+    Scalar.createApiReference('#openapi-viewer-mount', {
+      url: '/openapi.json',
+      theme: 'kepler',
+      layout: 'modern',
+      withDefaultFonts: false,
+      telemetry: false,
+      showDeveloperTools: 'never',
+      hideClientButton: true,
+      mcp: { disabled: true },
+      defaultHttpClient: { targetKey: 'shell', clientKey: 'curl' },
+      authentication: {
+        preferredSecurityScheme: 'BearerAuth'
+      },
+      customCss: ':root { --scalar-font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif; --scalar-font-code: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace; }'
+    });
+  </script>
+</body>
+</html>

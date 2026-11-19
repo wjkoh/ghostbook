@@ -1,0 +1,321 @@
+syntax = "proto3";
+
+package book.v1;
+
+option go_package = "github.com/wjkoh/ghostbook/gen/book/v1;bookv1";
+
+// BookService mirrors all 13 MCP operations 1-for-1 across ConnectRPC and OpenAPI 3.1:
+// collaborative reading, surgical Git editing, FTS5 + exact line search, blame,
+// agent audit logs, revision history inspection, and platform feedback reporting.
+service BookService {
+  // 1. Returns the full Table of Contents (SUMMARY.md), word counts, and last-modified metadata.
+  rpc GetTableOfContents(GetTableOfContentsRequest) returns (GetTableOfContentsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // 2. Reads the full Markdown source of a chapter (or SUMMARY / STYLE_GUIDE) and its Git revision lineage.
+  rpc ReadChapter(ReadChapterRequest) returns (ReadChapterResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // 3. Searches across all chapters (or within one slug) using SQLite FTS5 BM25 ranking plus 1-based line matching.
+  rpc SearchBook(SearchBookRequest) returns (SearchBookResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // 4. Applies a surgical search-and-replace edit (or multi-hunk patches array) to a chapter and commits via go-git.
+  rpc PatchChapter(PatchChapterRequest) returns (PatchChapterResponse);
+
+  // 5. Creates a new chapter file, registers it in SUMMARY.md, commits to Git, and indexes in SQLite FTS5.
+  rpc CreateChapter(CreateChapterRequest) returns (CreateChapterResponse);
+
+  // 6. Renames or moves a chapter slug and/or H1 title, updating SUMMARY.md and cross-chapter links.
+  rpc RenameChapter(RenameChapterRequest) returns (RenameChapterResponse);
+
+  // 7. Deletes a chapter from the active book and SUMMARY.md while preserving Git history for archived permalinks.
+  rpc DeleteChapter(DeleteChapterRequest) returns (DeleteChapterResponse);
+
+  // 8. Lists recent Git commits across the book or filtered to a single chapter.
+  rpc ListRecentChanges(ListRecentChangesRequest) returns (ListRecentChangesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // 9. Returns the unified Markdown diff for a specific commit SHA or between two revisions.
+  rpc GetCommitDiff(GetCommitDiffRequest) returns (GetCommitDiffResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // 10. Returns section-level Git blame attribution for a chapter.
+  rpc GetChapterBlame(GetChapterBlameRequest) returns (GetChapterBlameResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // 11. Restores a chapter to a prior commit SHA or revision number via a clean forward Git commit.
+  rpc RevertChapterRevision(RevertChapterRevisionRequest) returns (RevertChapterRevisionResponse);
+
+  // 12. Lists recent AI agent tool calls from the SQLite audit log across MCP and ConnectRPC.
+  rpc ListAgentActivity(ListAgentActivityRequest) returns (ListAgentActivityResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // 13. Submits a platform bug report, UX friction note, or feature request to SQLite and maintainer email.
+  rpc ReportPlatformFeedback(ReportPlatformFeedbackRequest) returns (ReportPlatformFeedbackResponse);
+}
+
+message GetTableOfContentsRequest {}
+
+message ChapterSummary {
+  string slug = 1;
+  string title = 2;
+  int32 word_count = 3;
+  int32 open_comment_count = 4;
+  string last_commit_sha = 5;
+  string last_author = 6;
+  string last_updated_iso = 7;
+  string live_url = 8;
+  int32 revision_number = 9;
+  string permalink_url = 10;
+  string part_title = 11;
+  int32 depth = 12;
+  string parent_slug = 13;
+  string number_label = 14;
+}
+
+message GetTableOfContentsResponse {
+  string head_commit_sha = 1;
+  string summary_markdown = 2;
+  repeated ChapterSummary chapters = 3;
+  string book_home_url = 4;
+  string book_pdf_url = 5;
+  int32 head_revision_number = 6;
+}
+
+message ReadChapterRequest {
+  string slug = 1;
+  string revision = 2;
+}
+
+message ReadChapterResponse {
+  string slug = 1;
+  string title = 2;
+  string content_markdown = 3;
+  string revision_sha = 4;
+  string last_author = 5;
+  string last_updated_iso = 6;
+  string live_url = 7;
+  reserved 8;
+  reserved "open_comments";
+  int32 revision_number = 9;
+  string permalink_url = 10;
+  string lifecycle_status = 11;
+  bool is_latest = 12;
+  int32 commits_behind = 13;
+  string latest_revision_sha = 14;
+  int32 latest_revision_number = 15;
+  string latest_live_url = 16;
+  string moved_to_slug = 17;
+  string moved_to_title = 18;
+  string lifecycle_commit_sha = 19;
+  string lifecycle_author = 20;
+  string lifecycle_timestamp_iso = 21;
+  string lifecycle_message = 22;
+}
+
+message SearchBookRequest {
+  string query = 1;
+  int32 limit = 2;
+  string slug = 3;
+}
+
+message SearchLineMatch {
+  int32 line_number = 1;
+  string line_text = 2;
+}
+
+message SearchMatch {
+  string slug = 1;
+  string title = 2;
+  string snippet = 3;
+  double bm25_score = 4;
+  string live_url = 5;
+  repeated SearchLineMatch line_matches = 6;
+}
+
+message SearchBookResponse {
+  repeated SearchMatch matches = 1;
+}
+
+message ChapterPatchHunk {
+  string old_text = 1;
+  string new_text = 2;
+}
+
+message PatchChapterRequest {
+  string slug = 1;
+  string old_text = 2;
+  string new_text = 3;
+  string commit_message = 4;
+  string expected_revision_sha = 5;
+  string author_name = 6;
+  repeated ChapterPatchHunk patches = 7;
+}
+
+message PatchChapterResponse {
+  string slug = 1;
+  string new_revision_sha = 2;
+  string committed_by = 3;
+  string diff_preview = 4;
+  string live_chapter_url = 5;
+  repeated string style_warnings = 6;
+}
+
+message CreateChapterRequest {
+  string slug = 1;
+  string title = 2;
+  string initial_markdown = 3;
+  string parent_slug = 4;
+  string commit_message = 5;
+  string author_name = 6;
+  string part_title = 7;
+}
+
+message CreateChapterResponse {
+  string slug = 1;
+  string new_revision_sha = 2;
+  string live_chapter_url = 3;
+  repeated string style_warnings = 4;
+}
+
+message RenameChapterRequest {
+  string old_slug = 1;
+  string new_slug = 2;
+  string new_title = 3;
+  string commit_message = 4;
+  string author_name = 5;
+}
+
+message RenameChapterResponse {
+  string old_slug = 1;
+  string new_slug = 2;
+  string new_title = 3;
+  string new_revision_sha = 4;
+  string live_chapter_url = 5;
+  string permalink_url = 6;
+}
+
+message DeleteChapterRequest {
+  string slug = 1;
+  string reason = 2;
+  string replaced_by_slug = 3;
+  string author_name = 4;
+}
+
+message DeleteChapterResponse {
+  string deleted_slug = 1;
+  string new_revision_sha = 2;
+  string archived_permalink_url = 3;
+}
+
+message ListRecentChangesRequest {
+  string slug = 1;
+  int32 limit = 2;
+}
+
+message CommitEntry {
+  string commit_sha = 1;
+  string author_name = 2;
+  string author_email = 3;
+  string timestamp_iso = 4;
+  string commit_message = 5;
+  repeated string files_changed = 6;
+  int32 revision_number = 7;
+  string full_sha = 8;
+}
+
+message ListRecentChangesResponse {
+  repeated CommitEntry commits = 1;
+}
+
+message GetCommitDiffRequest {
+  string commit_sha = 1;
+  string slug = 2;
+  string base_commit_sha = 3;
+}
+
+message GetCommitDiffResponse {
+  string commit_sha = 1;
+  string author_name = 2;
+  string timestamp_iso = 3;
+  string commit_message = 4;
+  string unified_diff = 5;
+}
+
+message GetChapterBlameRequest {
+  string slug = 1;
+}
+
+message BlameSection {
+  string heading = 1;
+  string last_commit_sha = 2;
+  string last_author = 3;
+  string last_updated_iso = 4;
+  int32 start_line = 5;
+  int32 end_line = 6;
+}
+
+message GetChapterBlameResponse {
+  string slug = 1;
+  repeated BlameSection sections = 2;
+}
+
+message RevertChapterRevisionRequest {
+  string slug = 1;
+  string target_commit_sha = 2;
+  string reason = 3;
+  string author_name = 4;
+}
+
+message RevertChapterRevisionResponse {
+  string slug = 1;
+  string new_revision_sha = 2;
+  string live_chapter_url = 3;
+}
+
+message ListAgentActivityRequest {
+  int32 limit = 1;
+  string author_id = 2;
+}
+
+message AgentActivityEntry {
+  int64 id = 1;
+  string timestamp_iso = 2;
+  string author_id = 3;
+  string protocol = 4;
+  string tool_name = 5;
+  string chapter_slug = 6;
+  string git_commit_sha = 7;
+  string status = 8;
+  int64 duration_ms = 9;
+  string user_agent = 10;
+  string error_message = 11;
+}
+
+message ListAgentActivityResponse {
+  repeated AgentActivityEntry entries = 1;
+}
+
+message ReportPlatformFeedbackRequest {
+  string kind = 1;
+  string summary = 2;
+  string details = 3;
+  string chapter_slug = 4;
+  string revision_sha = 5;
+}
+
+message ReportPlatformFeedbackResponse {
+  int64 feedback_id = 1;
+  string recorded_at_iso = 2;
+  string submitted_by = 3;
+  bool email_notified = 4;
+  string confirmation = 5;
+}

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "alice",
+    "display_name": "Alice Chen",
+    "email": "alice@example.com",
+    "role_badge": "Co-Author · Systems",
+    "aliases": ["alice@example.com", "alice"]
+  },
+  {
+    "id": "bob",
+    "display_name": "Bob Rivera",
+    "email": "bob@example.com",
+    "role_badge": "Co-Author · Product",
+    "aliases": ["bob@example.com", "bob"]
+  }
+]

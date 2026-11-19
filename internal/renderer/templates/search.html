@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{if .Query}}Search: {{.Query}} · {{end}}{{.Book.DisplayTitle}}</title>
+  {{template "machine_discovery_meta" .}}
+  <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="Book Search Results (Raw Markdown)">
+  <meta name="markdown-url" content="{{.MarkdownPath}}">
+  {{.JSONLDDiscovery}}
+  <style>{{studioCSS}}</style>
+</head>
+<body data-markdown-url="{{.MarkdownPath}}">
+<div class="layout-shell">
+  {{template "sidebar" .}}
+  <div class="main-column">
+    <header class="studio-topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="sidebarToggleBtn" onclick="toggleSidebar()" title="Toggle Table of Contents">☰ Contents</button>
+        <a href="/timeline" class="studio-btn">← Timeline</a>
+      </div>
+      <div class="topbar-right">
+        {{template "theme_select" .}}
+      </div>
+    </header>
+
+    <main class="chapter-container">
+      <article class="book-prose" id="ssrSearchRoot">
+        <h1>Search Book</h1>
+        <form action="/search" method="GET" class="ssr-search-bar" id="ssrSearchForm" role="search">
+          <input type="search" name="q" id="searchPageInput" class="form-input ssr-search-main-input" value="{{.Query}}" placeholder="Search across all chapters (e.g. architecture, [TODO, MCP)…" autofocus>
+          <select name="slug" class="form-input ssr-search-slug-select" aria-label="Filter by chapter">
+            <option value="">All chapters</option>
+            {{range .Book.Chapters}}
+            <option value="{{.Slug}}" {{if eq .Slug $.SlugFilter}}selected{{end}}>{{sidebarChapterTitle .Title}}</option>
+            {{end}}
+          </select>
+          <button type="submit" class="studio-btn primary">Search</button>
+        </form>
+
+        {{if .Query}}
+          {{if .Results}}
+          <p style="font-size:13.5px;color:var(--text-secondary);margin-bottom:16px;">Found <strong>{{len .Results}}</strong> matching {{if eq (len .Results) 1}}chapter{{else}}chapters{{end}} for <strong>“{{.Query}}”</strong>{{if .SlugFilter}} in <code>{{.SlugFilter}}</code>{{end}}.</p>
+          <div id="ssrSearchResults">
+            {{range .Results}}
+            <div class="studio-card ssr-search-card">
+              <div class="studio-card-header">
+                <a href="/chapters/{{.Slug}}" style="font-weight:700;font-size:15.5px;text-decoration:none;color:var(--text-primary);">{{.Title}}</a>
+                <a href="/chapters/{{.Slug}}" class="rev-pill" style="text-decoration:none;">{{.Slug}}</a>
+              </div>
+              {{if .Snippet}}
+              <div class="ssr-search-snippet">{{formatSearchSnippet .Snippet}}</div>
+              {{end}}
+              {{if .LineMatches}}
+              <div class="ssr-search-lines">
+                {{range .LineMatches}}
+                <div class="ssr-search-line-row">
+                  <span class="rev-pill">L{{.LineNumber}}</span>
+                  <span>{{.LineText}}</span>
+                </div>
+                {{end}}
+              </div>
+              {{end}}
+            </div>
+            {{end}}
+          </div>
+          {{else}}
+          <div class="studio-card" id="ssrSearchEmpty">No matching chapters found for <strong>“{{.Query}}”</strong>.</div>
+          {{end}}
+        {{else}}
+          <p style="color:var(--text-secondary);font-size:15.5px;">Enter keywords, exact phrases, dollar figures, or inline callout tags such as <code>[TODO</code> to search across all chapters via SQLite FTS5 BM25 and exact line matching.</p>
+        {{end}}
+      </article>
+    </main>
+  </div>
+</div>
+<script>{{studioJS}}</script>
+</body>
+</html>

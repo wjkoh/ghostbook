@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>History &amp; Blame · {{.ActiveChapter.Title}} · {{.Book.DisplayTitle}}</title>
+  {{template "machine_discovery_meta" .}}
+  <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="Chapter History &amp; Blame (Raw Markdown)">
+  <meta name="markdown-url" content="{{.MarkdownPath}}">
+  {{.JSONLDDiscovery}}
+  <style>{{studioCSS}}</style>
+</head>
+<body data-active-slug="{{.ActiveChapter.Slug}}" data-active-rev="{{.ActiveChapter.LastCommitSHA}}" data-markdown-url="{{.MarkdownPath}}">
+<div class="layout-shell">
+  {{template "sidebar" .}}
+  <div class="main-column">
+    <header class="studio-topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="sidebarToggleBtn" onclick="toggleSidebar()" title="Toggle Table of Contents">☰ Contents</button>
+        <a href="/chapters/{{.ActiveChapter.Slug}}" class="studio-btn">← Back to Chapter</a>
+      </div>
+      <div class="topbar-right">
+        <a href="/activity" class="studio-btn">Agent Activity</a>
+        {{template "theme_select" .}}
+      </div>
+    </header>
+
+    <main class="chapter-container">
+      <article class="book-prose" id="ssrChapterHistoryRoot">
+        <div class="chapter-part-kicker">Git Provenance &amp; Unified Diffs</div>
+        <h1>History &amp; Blame · {{.ActiveChapter.Title}}</h1>
+        <p class="home-lead">Section-by-section Git blame attribution and chronological commit diffs for <code>{{.ActiveChapter.Slug}}</code> (current revision <strong>r{{.ActiveChapter.RevisionNumber}} · {{.ActiveChapter.LastCommitSHA}}</strong>).</p>
+
+        <h2>Section-Level Git Blame</h2>
+        <div id="ssrBlameList">
+          {{if .BlameSections}}
+            {{range .BlameSections}}
+            <div class="studio-card" style="padding:10px 14px;margin-bottom:8px;">
+              <div class="studio-card-header">
+                <strong>{{.Heading}}</strong>
+                <a href="/chapters/{{$.ActiveChapter.Slug}}/rev/{{.LastCommitSHA}}" class="rev-pill" style="text-decoration:none;">{{.LastCommitSHA}}</a>
+              </div>
+              <div style="font-size:12.5px;color:var(--text-secondary);">Attributed to <strong>{{.LastAuthor}}</strong> · lines {{.StartLine}}–{{.EndLine}} · {{formatTimestamp .LastUpdatedISO}}</div>
+            </div>
+            {{end}}
+          {{else}}
+            <div class="studio-card">No section blame records available.</div>
+          {{end}}
+        </div>
+
+        <h2>Chapter Commits &amp; Unified Diffs</h2>
+        <div id="ssrCommitsList">
+          {{range $idx, $c := .Commits}}
+          <div class="studio-card" style="margin-bottom:14px;">
+            <div class="studio-card-header">
+              <div>
+                <strong>{{$c.AuthorName}}</strong>
+                <span style="font-size:12px;color:var(--text-muted);">· {{formatTimestamp $c.TimestampISO}}</span>
+              </div>
+              <a href="/chapters/{{$.ActiveChapter.Slug}}/rev/{{$c.CommitSHA}}" class="rev-pill" style="text-decoration:none;">{{if gt $c.RevisionNumber 0}}r{{$c.RevisionNumber}} · {{end}}{{$c.CommitSHA}}</a>
+            </div>
+            <div style="font-size:14px;margin-bottom:10px;">{{$c.CommitMessage}}</div>
+            <details class="ssr-diff-details" {{if eq $idx 0}}open{{end}}>
+              <summary class="ssr-diff-summary">
+                <span>Unified Diff</span>
+                <a href="/chapters/{{$.ActiveChapter.Slug}}/rev/{{$c.CommitSHA}}" class="provenance-chip" onclick="event.stopPropagation();">Open Snapshot →</a>
+              </summary>
+              <div class="diff-box" style="margin-top:8px;">{{formatUnifiedDiffHTML $c.UnifiedDiff}}</div>
+            </details>
+          </div>
+          {{end}}
+        </div>
+      </article>
+    </main>
+  </div>
+</div>
+<script>{{studioJS}}</script>
+</body>
+</html>

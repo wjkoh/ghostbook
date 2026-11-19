@@ -1,0 +1,32 @@
+{
+	admin off
+}
+
+book.example.com {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+	}
+
+	@debug {
+		path /debug/*
+	}
+	handle @debug {
+		respond "Not Found" 404
+	}
+
+	@mcp {
+		path /mcp* /u/*/mcp*
+	}
+	handle @mcp {
+		reverse_proxy 127.0.0.1:8090 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8090
+	}
+}

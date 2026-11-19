@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Timeline · {{.Book.DisplayTitle}}</title>
+  {{template "machine_discovery_meta" .}}
+  <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="{{.Book.DisplayTitle}} Index &amp; Timeline (Raw Markdown)">
+  <meta name="markdown-url" content="{{.MarkdownPath}}">
+  <link rel="canonical" href="{{.CanonicalURLPath}}">
+  {{.JSONLDDiscovery}}
+  <style>{{studioCSS}}</style>
+</head>
+<body data-markdown-url="{{.MarkdownPath}}">
+<div class="layout-shell">
+  {{template "sidebar" .}}
+
+  <div class="main-column">
+    <header class="studio-topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="sidebarToggleBtn" onclick="toggleSidebar()" title="Toggle Table of Contents">☰ Contents</button>
+      </div>
+      <div class="topbar-right">
+        <a href="/changelog" class="studio-btn">Git Commit Log</a>
+        {{template "theme_select" .}}
+      </div>
+    </header>
+
+    <main class="chapter-container">
+      <div class="chapter-part-kicker">{{.Book.DisplayKicker}} · Recent Updates</div>
+
+      <div class="provenance-banner" id="homeProvenanceBanner">
+        <div class="provenance-meta">
+          <a href="/rev/{{.Book.HeadCommitSHA}}" class="rev-link" title="Open snapshot at HEAD revision r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})">
+            <span class="rev-pill">r{{.Book.HeadRevisionNumber}}</span>
+            <span class="rev-pill">{{.Book.HeadCommitSHA}}</span>
+          </a>
+          <span>· {{len .Book.Chapters}} chapters</span>
+          <span>· {{.TotalWords}} words</span>
+          <span>· {{len .Book.TimelineEntries}} {{if eq (len .Book.TimelineEntries) 1}}milestone{{else}}milestones{{end}}</span>
+        </div>
+        <div class="provenance-actions">
+          <a href="/feed.xml" class="provenance-chip" title="Subscribe to Timeline milestones via RSS 2.0">RSS Feed</a>
+          <a href="/changelog" class="provenance-chip">Git Commit Log →</a>
+        </div>
+      </div>
+
+      <article class="book-prose" id="frontPageBriefing">
+        <h1>Timeline</h1>
+        <p class="home-lead">Recent changes across {{.Book.DisplayTitle}}, grouped by topic and editing session with minor copy-edits filtered out.</p>
+
+        {{if gt .Book.PendingTimelineCommits 0}}
+        <div class="timeline-pending-banner" id="timelinePendingBanner">
+          <span><strong>Active session:</strong> {{.Book.PendingTimelineCommits}} recent {{if eq .Book.PendingTimelineCommits 1}}commit{{else}}commits{{end}} ({{if eq .Book.PendingStartRevision .Book.PendingEndRevision}}r{{.Book.PendingEndRevision}}{{else}}r{{.Book.PendingStartRevision}} → r{{.Book.PendingEndRevision}}{{end}}) settling before next timeline update.</span>
+          <a href="/changelog" class="provenance-chip">Git Commit Log →</a>
+        </div>
+        {{end}}
+
+        {{if .FrontPageTimelineEntries}}
+        <ol class="timeline-feed" id="frontPageTimeline">
+          {{range .FrontPageTimelineEntries}}
+          {{template "timeline_milestone" .}}
+          {{end}}
+        </ol>
+        {{if .HasMoreTimelineEntries}}
+        <p class="timeline-more-link" id="timelineMoreLink">Showing latest {{.FrontPageTimelineLimitValue}} of {{len .Book.TimelineEntries}} milestones · <a href="{{.ExpandAllPath}}">Show {{.OlderTimelineCount}} older {{if eq .OlderTimelineCount 1}}milestone{{else}}milestones{{end}} →</a></p>
+        {{else if .CanCollapseTimeline}}
+        <p class="timeline-more-link" id="timelineMoreLink">Showing all {{len .Book.TimelineEntries}} milestones · <a href="{{.CanonicalURLPath}}">Show latest {{.FrontPageTimelineLimitValue}} only</a></p>
+        {{end}}
+        {{else}}
+        <p class="timeline-empty-note">No multi-commit milestones synthesized yet. Inspect the <a href="/changelog">Git Commit Log</a> or start reading below.</p>
+        {{end}}
+
+        {{if .Book.OpenCallouts}}
+        <section id="frontPageOpenCallouts" class="home-callouts-section">
+          <h2>Open Callouts ({{len .Book.OpenCallouts}})</h2>
+          <ul class="editorial-briefing-callouts-list">
+            {{range .Book.OpenCallouts}}
+            <li>
+              <span class="callout-kind-pill">{{.Kind}}</span>
+              {{if .AuthorLabel}}<strong>{{.AuthorLabel}}</strong> · {{end}}<a href="/chapters/{{.ChapterSlug}}">{{.ChapterName}}</a>: {{.Excerpt}}
+            </li>
+            {{end}}
+          </ul>
+        </section>
+        {{end}}
+      </article>
+
+      <nav class="chapter-pager">
+        <a href="/changelog" class="pager-link">
+          <span class="pager-label">Audit Trail</span>
+          <span class="pager-title">Git Commit Log</span>
+        </a>
+        {{if .FirstChapter}}
+        <a href="/chapters/{{.FirstChapter.Slug}}" class="pager-link" style="text-align:right;">
+          <span class="pager-label">Start Reading →</span>
+          <span class="pager-title">{{.FirstChapter.Title}}</span>
+        </a>
+        {{end}}
+      </nav>
+    </main>
+  </div>
+</div>
+<script>{{studioJS}}</script>
+</body>
+</html>

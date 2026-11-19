@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.ActiveChapter.Title}} · {{.Book.DisplayTitle}}</title>
+  {{template "machine_discovery_meta" .}}
+  <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="{{.ActiveChapter.Title}} (Raw Markdown)">
+  <meta name="markdown-url" content="{{.MarkdownPath}}">
+  {{if .CanonicalPath}}<link rel="canonical" href="{{.CanonicalPath}}">{{end}}
+  {{.JSONLDDiscovery}}
+  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+  <style>{{studioCSS}}</style>
+</head>
+<body data-active-slug="{{.ActiveChapter.Slug}}" data-active-rev="{{.ActiveChapter.LastCommitSHA}}" data-active-rev-num="{{.ActiveChapter.RevisionNumber}}" data-lifecycle-status="{{.ActiveChapter.LifecycleStatus}}" data-markdown-url="{{.MarkdownPath}}">
+<div class="layout-shell">
+  {{template "sidebar" .}}
+
+  <div class="main-column">
+    <header class="studio-topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="sidebarToggleBtn" onclick="toggleSidebar()" title="Toggle Table of Contents">☰ Contents</button>
+      </div>
+
+      <div class="topbar-right">
+        <a href="/chapters/{{.ActiveChapter.Slug}}/history" class="studio-btn" id="linkChapterHistory">
+          History &amp; Blame
+        </a>
+        {{template "theme_select" .}}
+      </div>
+    </header>
+
+    <main class="chapter-container">
+      {{if .ActiveChapter.IsPermalinkView}}
+      <div class="permalink-banner status-{{.ActiveChapter.LifecycleStatus}}" id="permalinkLineageBanner" data-status="{{.ActiveChapter.LifecycleStatus}}">
+        <div class="permalink-banner-row">
+          {{if eq .ActiveChapter.LifecycleStatus "outdated"}}
+          <div class="permalink-banner-text">
+            <strong>Revision r{{.ActiveChapter.RevisionNumber}} ({{.ActiveChapter.LastCommitSHA}})</strong>
+            <span>· A Newer Version Exists (r{{.ActiveChapter.LatestRevisionNumber}})</span>
+          </div>
+          <div class="permalink-banner-actions">
+            <a href="/chapters/{{.ActiveChapter.Slug}}" class="studio-btn primary" id="btnPermalinkViewLatest">Latest (r{{.ActiveChapter.LatestRevisionNumber}}) →</a>
+          </div>
+          {{else if eq .ActiveChapter.LifecycleStatus "renamed"}}
+          <div class="permalink-banner-text">
+            <strong>Chapter Renamed · Viewing r{{.ActiveChapter.RevisionNumber}} ({{.ActiveChapter.LastCommitSHA}})</strong>
+            <span>· Latest title: “{{.ActiveChapter.MovedToTitle}}”</span>
+          </div>
+          <div class="permalink-banner-actions">
+            <a href="/chapters/{{.ActiveChapter.Slug}}" class="studio-btn primary" id="btnPermalinkViewLatest">View Latest →</a>
+          </div>
+          {{else if eq .ActiveChapter.LifecycleStatus "moved"}}
+          <div class="permalink-banner-text">
+            <strong>Chapter Moved / Renamed · r{{.ActiveChapter.RevisionNumber}} ({{.ActiveChapter.LastCommitSHA}})</strong>
+            <span>· {{.ActiveChapter.Slug}} → {{.ActiveChapter.MovedToSlug}}</span>
+          </div>
+          <div class="permalink-banner-actions">
+            <a href="/chapters/{{.ActiveChapter.MovedToSlug}}" class="studio-btn primary" id="btnPermalinkGoMoved">Go to {{.ActiveChapter.MovedToSlug}} →</a>
+          </div>
+          {{else if eq .ActiveChapter.LifecycleStatus "deleted"}}
+          <div class="permalink-banner-text">
+            <strong>Deleted Chapter Archive · r{{.ActiveChapter.RevisionNumber}} ({{.ActiveChapter.LastCommitSHA}})</strong>
+            {{if .ActiveChapter.MovedToSlug}}<span>· Replaced by {{.ActiveChapter.MovedToSlug}}</span>{{end}}
+          </div>
+          <div class="permalink-banner-actions">
+            {{if .ActiveChapter.MovedToSlug}}
+            <a href="/chapters/{{.ActiveChapter.MovedToSlug}}" class="studio-btn primary" id="btnPermalinkGoReplacement">Open {{.ActiveChapter.MovedToSlug}} →</a>
+            {{end}}
+            <a href="/" class="provenance-chip">← Active Book</a>
+          </div>
+          {{else}}
+          <div class="permalink-banner-text">
+            <strong>Pinned Revision Permalink · r{{.ActiveChapter.RevisionNumber}} ({{.ActiveChapter.LastCommitSHA}})</strong>
+            <span>· Matches Latest HEAD</span>
+          </div>
+          <div class="permalink-banner-actions">
+            <a href="/chapters/{{.ActiveChapter.Slug}}" class="provenance-chip">Live Chapter URL →</a>
+          </div>
+          {{end}}
+        </div>
+        {{if .ActiveChapter.DiffToLatest}}
+        <details class="ssr-diff-details" id="permalinkDiffDetails" style="margin-top:8px;">
+          <summary class="ssr-diff-summary">Compare Diff with Latest</summary>
+          <div class="diff-box" id="permalinkDiffContent" style="margin-top:8px;">{{formatUnifiedDiffHTML .ActiveChapter.DiffToLatest}}</div>
+        </details>
+        {{end}}
+      </div>
+      {{end}}
+
+      {{if .ActiveChapter.PartTitle}}
+      <div class="chapter-part-kicker" id="chapterPartKicker">{{.ActiveChapter.PartTitle}}</div>
+      {{end}}
+
+      <div class="provenance-banner" id="provenanceBanner">
+        <div class="provenance-meta">
+          <a href="/chapters/{{.ActiveChapter.Slug}}/rev/{{.ActiveChapter.LastCommitSHA}}" class="rev-link" id="chapterPermalinkAnchor" title="Open immutable snapshot for revision r{{.ActiveChapter.RevisionNumber}} ({{.ActiveChapter.LastCommitSHA}})">
+            <span id="chapterRevNumberBadge" class="rev-pill">r{{.ActiveChapter.RevisionNumber}}</span>
+            <span id="chapterRevBadge" class="rev-pill">{{.ActiveChapter.LastCommitSHA}}</span>
+          </a>
+          <span>· <strong id="chapterLastAuthor">{{.ActiveChapter.LastAuthor}}</strong></span>
+          <span>· <span id="chapterLastUpdated" title="{{.ActiveChapter.LastUpdatedISO}}">{{formatTimestamp .ActiveChapter.LastUpdatedISO}}</span></span>
+          <span>· {{.ActiveChapter.WordCount}} words</span>
+        </div>
+        <div class="provenance-actions">
+          <button class="provenance-chip" id="btnCopyPermalink" onclick="copyChapterPermalink()" title="Copy permanent link to revision r{{.ActiveChapter.RevisionNumber}} ({{.ActiveChapter.LastCommitSHA}})">🔗 Copy Permalink</button>
+        </div>
+      </div>
+
+      <article class="book-prose" id="chapterProse">
+        {{.ActiveChapter.RenderedHTML}}
+      </article>
+
+      <nav class="chapter-pager">
+        {{if .ActiveChapter.PrevSlug}}
+        <a href="/chapters/{{.ActiveChapter.PrevSlug}}" class="pager-link">
+          <span class="pager-label">← Previous Chapter</span>
+          <span class="pager-title">{{.ActiveChapter.PrevTitle}}</span>
+        </a>
+        {{else}}<div></div>{{end}}
+
+        {{if .ActiveChapter.NextSlug}}
+        <a href="/chapters/{{.ActiveChapter.NextSlug}}" class="pager-link" style="text-align:right;">
+          <span class="pager-label">Next Chapter →</span>
+          <span class="pager-title">{{.ActiveChapter.NextTitle}}</span>
+        </a>
+        {{end}}
+      </nav>
+    </main>
+  </div>
+</div>
+
+<script src="/static/vendor/katex/katex.min.js"></script>
+<script src="/static/vendor/katex/auto-render.min.js"></script>
+<script src="/static/vendor/mermaid/mermaid.min.js"></script>
+<script>{{studioJS}}</script>
+</body>
+</html>

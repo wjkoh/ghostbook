@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Git Commit Log · {{.Book.DisplayTitle}}</title>
+  {{template "machine_discovery_meta" .}}
+  <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="Git Commit Log (Raw Markdown)">
+  <meta name="markdown-url" content="{{.MarkdownPath}}">
+  {{.JSONLDDiscovery}}
+  <style>{{studioCSS}}</style>
+</head>
+<body data-markdown-url="{{.MarkdownPath}}">
+<div class="layout-shell">
+  {{template "sidebar" .}}
+  <div class="main-column">
+    <header class="studio-topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" id="sidebarToggleBtn" onclick="toggleSidebar()" title="Toggle Table of Contents">☰ Contents</button>
+        <a href="/timeline" class="studio-btn">← Timeline</a>
+      </div>
+      <div class="topbar-right">
+        <a href="/activity" class="studio-btn">Agent Activity</a>
+        {{template "theme_select" .}}
+      </div>
+    </header>
+    <main class="chapter-container wide-ledger-container">
+      <article class="book-prose">
+        <h1>Git Commit Log</h1>
+        <p>Every prose edit, inline <code>[TODO]</code>, and <code>[Comment]</code> callout across Claude, ChatGPT, and Gemini / Antigravity is recorded as an attributed Git commit via pure-Go <strong>go-git</strong> and synchronized with GitHub.</p>
+
+        <div class="table-scroll-wrap">
+          <table id="rawCommitLedger" class="ledger-table">
+            <colgroup>
+              <col style="width:13%;">
+              <col style="width:19%;">
+              <col style="width:16%;">
+              <col style="width:30%;">
+              <col style="width:22%;">
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Revision</th>
+                <th>Author</th>
+                <th>Timestamp (UTC)</th>
+                <th>Summary</th>
+                <th>Modified Chapters</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{range .Book.RecentCommits}}
+              <tr>
+                <td><a href="/rev/{{.ShortSHA}}" class="rev-pill" style="text-decoration:none;">{{if gt .RevisionNumber 0}}r{{.RevisionNumber}} · {{end}}{{.ShortSHA}}</a></td>
+                <td><strong>{{.AuthorName}}</strong><br><span style="font-size:11.5px;color:var(--text-muted);">{{.AuthorEmail}}</span></td>
+                <td title="{{.TimestampISO}}" style="font-size:12.5px;">{{formatTimestamp .TimestampISO}}</td>
+                <td>{{.CommitMessage}}</td>
+                <td><div style="display:flex;flex-wrap:wrap;gap:4px;">{{range .FilesChanged}}<span class="ledger-file-pill">{{.}}</span>{{end}}</div></td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </main>
+  </div>
+</div>
+<script>{{studioJS}}</script>
+</body>
+</html>

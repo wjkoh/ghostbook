@@ -1,0 +1,9 @@
+[Unit]
+Description=Apply staged Ghostbook binary when idle
+After=network-online.target ghostbook.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ghostbook-apply-staged
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diagram {{.DiagramIndex}} · {{.ActiveChapter.Title}}</title>
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">
+  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">
+  <meta name="referrer" content="no-referrer">
+  {{template "agent_discovery_links" .}}
+  <link rel="alternate" type="text/markdown" href="{{.MarkdownPath}}" title="Raw Mermaid Diagram Source (.mmd)">
+  <meta name="markdown-url" content="{{.MarkdownPath}}">
+  {{.JSONLDDiscovery}}
+  <style>
+    html, body { margin: 0; padding: 0; background: #ffffff; }
+    pre.mermaid { margin: 0; padding: 24px; text-align: center; }
+    pre.mermaid svg { max-width: 100%; height: auto; }
+  </style>
+</head>
+<body data-active-slug="{{.ActiveChapter.Slug}}" data-active-rev="{{.ActiveChapter.LastCommitSHA}}" data-diagram-index="{{.DiagramIndex}}" data-markdown-url="{{.MarkdownPath}}">
+  <pre class="mermaid" id="standaloneMermaidPre">{{.DiagramSource}}</pre>
+  <script src="/static/vendor/mermaid/mermaid.min.js"></script>
+  <script>
+  (async function() {
+    document.body.style.background = '#ffffff';
+    if (!window.mermaid) return;
+    window.mermaid.initialize({
+      startOnLoad: false,
+      theme: 'neutral',
+      securityLevel: 'strict'
+    });
+    var el = document.getElementById('standaloneMermaidPre');
+    if (!el) return;
+    try {
+      if (typeof window.mermaid.run === 'function') {
+        await window.mermaid.run({ nodes: [el] });
+      } else if (typeof window.mermaid.init === 'function') {
+        window.mermaid.init(undefined, [el]);
+      }
+    } catch (_) {}
+  })();
+  </script>
+</body>
+</html>

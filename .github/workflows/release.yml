@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cross-compile release binaries
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          for target in "linux amd64" "linux arm64" "darwin arm64"; do
+            set -- $target
+            GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "dist/ghostbook-${1}-${2}" \
+              ./cmd/ghostbook
+          done
+          (cd dist && sha256sum ghostbook-* > SHA256SUMS)
+          ls -la dist
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "Ghostbook $TAG" \
+            --generate-notes

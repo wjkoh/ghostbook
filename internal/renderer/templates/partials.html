@@ -1,0 +1,107 @@
+{{define "agent_discovery_links"}}
+  <link rel="service-desc" type="application/vnd.oai.openapi+json" href="/openapi.json">
+  <link rel="service-doc" href="/api-docs">
+  <link rel="alternate" type="application/rss+xml" href="/feed.xml" title="Editorial Timeline RSS">
+  <link rel="llms-txt" type="text/markdown" href="/llms.txt" title="Book Index (llms.txt)">
+  <link rel="llms-full-txt" type="text/markdown" href="/llms-full.txt" title="Full Raw Markdown">
+  <meta name="llms-txt" content="/llms.txt">
+  <meta name="llms-full-txt" content="/llms-full.txt">
+  <meta name="mcp-server" content="/u/<email>:<secret-key>/mcp">
+{{end}}
+
+{{define "machine_discovery_meta"}}
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">
+  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex, max-snippet:0">
+  <meta name="referrer" content="no-referrer">
+  {{template "agent_discovery_links" .}}
+  <script>
+    (function() {
+      var pref = localStorage.getItem('ghostbook_theme') || 'system';
+      var resolved = pref === 'system'
+        ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : pref;
+      document.documentElement.setAttribute('data-theme', resolved);
+    })();
+  </script>
+{{end}}
+
+{{define "theme_select"}}
+  <select id="themeSelect" class="theme-select" aria-label="Color Theme" title="Color Theme" onchange="setReaderTheme(this.value)">
+    <option value="system">◐ System</option>
+    <option value="light">☀ Light</option>
+    <option value="sepia">📖 Sepia</option>
+    <option value="dark">☾ Dark</option>
+  </select>
+{{end}}
+
+{{define "sidebar"}}
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeMobileSidebar()"></div>
+  <aside class="book-sidebar" id="bookSidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-top">
+        <div class="sidebar-kicker">{{.Book.DisplayKicker}}</div>
+        <button class="sidebar-close-btn" id="sidebarCloseBtn" onclick="closeMobileSidebar()" aria-label="Close Table of Contents">✕</button>
+      </div>
+      <a href="/" class="sidebar-title">{{.Book.DisplayTitle}}</a>
+      <div class="sidebar-meta">
+        <span>HEAD</span>
+        <span class="rev-pill" id="sidebarHeadSha">{{if gt .Book.HeadRevisionNumber 0}}r{{.Book.HeadRevisionNumber}} · {{end}}{{.Book.HeadCommitSHA}}</span>
+        {{if .Book.Authors}}<span>· {{len .Book.Authors}} {{if eq (len .Book.Authors) 1}}Author{{else}}Co-Authors{{end}}</span>{{end}}
+      </div>
+    </div>
+
+    <form action="/search" method="GET" class="sidebar-search-form" role="search" id="sidebarSearchForm">
+      <input type="search" name="q" id="sidebarSearchInput" class="sidebar-search-input" placeholder="Search chapters &amp; concepts…" aria-label="Search chapters and concepts">
+      <span class="kbd-hint" aria-hidden="true">⌘K</span>
+    </form>
+
+    <nav class="toc-nav">
+      <a href="/timeline" class="toc-item {{if eq .ActiveStudioPage "home"}}active{{end}}">
+        <span>Timeline</span>
+      </a>
+      <div class="toc-section-label">Table of Contents</div>
+      {{range .Book.Chapters}}
+      {{if .StartsNewPart}}
+      <div class="toc-part-header" data-part-header="{{.PartTitle}}" onclick="toggleTocPart(this)">{{sidebarPartTitle .PartTitle}}</div>
+      {{end}}
+      <a href="/chapters/{{.Slug}}" class="toc-item {{if .PartTitle}}in-part{{end}} {{if gt .Depth 0}}depth-{{.Depth}}{{end}} {{if eq .Slug $.ActiveChapterSlug}}active{{end}}" data-slug="{{.Slug}}" data-part="{{.PartTitle}}" data-parent="{{.ParentSlug}}" data-depth="{{.Depth}}">
+        <span>{{sidebarChapterTitle .Title}}</span>
+      </a>
+      {{end}}
+
+      <div class="toc-section-label">Editorial Studio &amp; Export</div>
+      <a href="/guide" class="toc-item {{if eq .ActiveStudioPage "guide"}}active{{end}}">
+        <span>Co-Author AI Setup Guide</span>
+      </a>
+      <a href="/changelog" class="toc-item {{if eq .ActiveStudioPage "changelog"}}active{{end}}">
+        <span>Git Commit Log</span>
+      </a>
+      <a href="/print" class="toc-item {{if eq .ActiveStudioPage "print"}}active{{end}}">
+        <span>US-Letter Full Book Print View</span>
+      </a>
+    </nav>
+  </aside>
+{{end}}
+
+{{define "timeline_milestone"}}
+<li class="timeline-entry" id="milestone-r{{.EndRevision}}">
+  <div class="timeline-marker" aria-hidden="true"></div>
+  <div class="timeline-content">
+    <div class="timeline-meta-row">
+      <time class="timeline-time" datetime="{{.TimestampISO}}" title="{{.TimestampISO}}">{{formatTimestamp .TimestampISO}}</time>
+      <a href="/rev/{{.EndCommitSHA}}" class="rev-pill timeline-rev-pill">{{if eq .StartRevision .EndRevision}}r{{.EndRevision}}{{else}}r{{.StartRevision}} → r{{.EndRevision}}{{end}}</a>
+      <span class="timeline-commit-count">{{.CommitCount}} {{if eq .CommitCount 1}}commit{{else}}commits{{end}}</span>
+      {{if .Authors}}<span class="editorial-briefing-authors">· {{.Authors}}</span>{{end}}
+    </div>
+    <div class="timeline-title">{{.Title}}</div>
+    <p class="timeline-summary">{{.Summary}}</p>
+    {{if .Chapters}}
+    <div class="editorial-briefing-item-links">
+      {{range .Chapters}}
+      <a href="/chapters/{{.Slug}}" class="briefing-chapter-chip">{{.Label}}</a>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+</li>
+{{end}}
