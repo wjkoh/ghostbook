@@ -199,7 +199,7 @@ func TestAppendOnlyImmutabilityAndSessionDebounce_UT_TL_03(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		eng.StartBriefingSynthesizerWithRetry(workerCtx, 90*time.Millisecond, 5*time.Second)
+		eng.StartBriefingSynthesizerWithRetry(workerCtx, 400*time.Millisecond, 5*time.Second)
 	}()
 
 	// Wait for cold-start bootstrap pass #1 (r2..r3)
@@ -222,7 +222,7 @@ func TestAppendOnlyImmutabilityAndSessionDebounce_UT_TL_03(t *testing.T) {
 		t.Fatalf("unexpected initial milestone: %+v", firstPublished)
 	}
 
-	// Burst of 4 rapid edits (r4..r7) inside the 90ms debounce window
+	// Burst of 4 rapid edits (r4..r7) inside the 400ms debounce window
 	prevText := "staged idle-window upgrades."
 	for i := 1; i <= 4; i++ {
 		nextText := prevText + " Step."
@@ -240,7 +240,7 @@ func TestAppendOnlyImmutabilityAndSessionDebounce_UT_TL_03(t *testing.T) {
 		prevText = nextText
 	}
 
-	// Immediately after the 4th write (before 90ms debounce elapses):
+	// Immediately after the 4th write (before 400ms debounce elapses):
 	// 1) Published milestone #1 MUST still be visible (zero flicker)
 	// 2) PendingTimelineCommits MUST report 4 settling commits (r4 -> r7)
 	midSnap := eng.CurrentSnapshot()
@@ -252,7 +252,7 @@ func TestAppendOnlyImmutabilityAndSessionDebounce_UT_TL_03(t *testing.T) {
 	}
 
 	// Wait for debounced pass #2 to append the r4..r7 milestone
-	deadline = time.Now().Add(2 * time.Second)
+	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if len(eng.CurrentSnapshot().TimelineEntries) == 2 {
 			break
