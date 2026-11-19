@@ -444,6 +444,7 @@ func TestSidebarAndTopbarParity_AcrossAllStudioPages(t *testing.T) {
 		{Href: "/chapters/01-system-architecture", Label: "1. MFO Stack Teardown"},
 		{Href: "/chapters/01a-legacy-bottlenecks", Label: "1.1 Legacy Bottlenecks"},
 		{Href: "/guide", Label: "Co-Author AI Setup Guide"},
+		{Href: "/STYLE_GUIDE", Label: "Style Guide &amp; Rules"},
 		{Href: "/changelog", Label: "Git Commit Log"},
 		{Href: "/print", Label: "US-Letter Full Book Print View"},
 	}
@@ -1058,5 +1059,56 @@ func TestSidebarPoweredByCredit(t *testing.T) {
 	}
 	if strings.Contains(string(hiddenHTML), `<footer class="sidebar-footer">`) || strings.Contains(string(hiddenHTML), "https://github.com/wjkoh/ghostbook") {
 		t.Fatalf("expected Powered by Ghostbook footer to be suppressed when HidePoweredBy is true")
+	}
+}
+
+func TestStyleGuideGovernanceAndConfigCard_UT_UI_01(t *testing.T) {
+	styleCh := &renderer.ChapterView{
+		Slug:         "STYLE_GUIDE",
+		Title:        "Editorial Style Guide",
+		RenderedHTML: "<h1>Editorial Style Guide</h1><p>Keep prose crisp.</p>",
+	}
+	book := &renderer.RenderedBook{
+		BookTitle:     "Distributed Field Guide",
+		BookKicker:    "Engineering Handbook",
+		HeadCommitSHA: "abc1234",
+		BookConfig: renderer.BookConfigView{
+			MaxHeadingChars:  50,
+			ForbidEmDash:     false,
+			BannedWords:      []string{"synergy", "leverage"},
+			TimelineGuidance: "Prefer WAL and Raft terms.",
+			FromRepoFile:     true,
+			ConfigWarning:    "Sample parse warning",
+		},
+		Chapters: []*renderer.ChapterView{},
+		BySlug:   map[string]*renderer.ChapterView{},
+	}
+
+	styleHTML, err := renderer.RenderChapterPage(renderer.ChapterPageData{
+		Book:          book,
+		ActiveChapter: styleCh,
+		BaseURL:       "https://docs.example.com",
+	})
+	if err != nil {
+		t.Fatalf("RenderChapterPage(STYLE_GUIDE): %v", err)
+	}
+	s := string(styleHTML)
+	for _, want := range []string{
+		`href="/STYLE_GUIDE"`,
+		`id="styleGuideGovernanceBanner"`,
+		`id="activeBookConfigCard"`,
+		`id="bookConfigWarningBanner"`,
+		`Sample parse warning`,
+		`50 chars`,
+		`synergy`,
+		`Prefer WAL and Raft terms.`,
+		`href="/book.json"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("STYLE_GUIDE HTML missing %q", want)
+		}
+	}
+	if strings.Contains(s, `id="linkChapterHistory"`) {
+		t.Fatalf("did not expect History & Blame button on STYLE_GUIDE page")
 	}
 }

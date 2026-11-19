@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -247,11 +248,36 @@ func (e *BookEngine) rebuildSnapshotAndFTSLocked(ctx context.Context) error {
 		slog.Warn("snapshot_list_authors_failed", "error", aErr)
 	}
 
+	var rawBookConfig []byte
+	if cfgBytes, cfgErr := e.readSrcFileSafe("book.json"); cfgErr == nil {
+		rawBookConfig = cfgBytes
+	} else if !os.IsNotExist(cfgErr) {
+		slog.Warn("book_config_read_failed", "error", cfgErr)
+	}
+	effCfg, cfgWarning := ResolveEffectiveBookConfig(e.cfg, rawBookConfig)
+	e.effectiveCfg.Store(&effCfg)
+	if cfgWarning != "" {
+		slog.Warn("book_config_parse_failed", "warning", cfgWarning)
+		if alerter := e.AlertNotifier(); alerter != nil {
+			alerter.NotifyError(ctx, "book_config_parse_failed", "Invalid src/book.json; falling back to server defaults", cfgWarning)
+		}
+	}
+
 	e.snapshot.Store(&renderer.RenderedBook{
-		BookTitle:              e.BookTitle(),
-		BookKicker:             e.BookKicker(),
-		MCPName:                e.MCPName(),
-		HidePoweredBy:          e.cfg.HidePoweredBy,
+		BookTitle:     effCfg.BookTitle,
+		BookKicker:    effCfg.BookKicker,
+		MCPName:       e.MCPName(),
+		HidePoweredBy: effCfg.HidePoweredBy,
+		BookConfig: renderer.BookConfigView{
+			MaxHeadingChars:  effCfg.Lint.MaxHeadingChars,
+			ForbidEmDash:     effCfg.Lint.ForbidEmDash,
+			BannedWords:      slices.Clone(effCfg.Lint.BannedWords),
+			TimelineGuidance: effCfg.TimelineGuidance,
+			HasExtraLLMs:     effCfg.ExtraLLMsMarkdown != "",
+			HidePoweredBy:    effCfg.HidePoweredBy,
+			FromRepoFile:     effCfg.FromRepoFile,
+			ConfigWarning:    cfgWarning,
+		},
 		Authors:                authorViews,
 		HeadCommitSHA:          headSHA,
 		HeadRevisionNumber:     histIdx.headRevNum,

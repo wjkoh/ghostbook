@@ -887,5 +887,38 @@ func TestBrowserEndToEnd_BT01_to_BT05(t *testing.T) {
 		if changelogCheck != "ok" {
 			t.Fatalf("UT-TL-06 /changelog mobile check failed: %s", changelogCheck)
 		}
+
+		// E2E-CDP-01: Navigate to /STYLE_GUIDE via sidebar link and verify governance card + zero overflow
+		_, _ = cdp.call("Emulation.setDeviceMetricsOverride", map[string]any{
+			"width":             1440,
+			"height":            900,
+			"deviceScaleFactor": 1,
+			"mobile":            false,
+		})
+		cdp.navigate(t, ts.URL+"/")
+		time.Sleep(150 * time.Millisecond)
+		styleLinkHref := cdp.evalString(t, `(() => {
+			const a = document.querySelector('.book-sidebar a[href="/STYLE_GUIDE"]');
+			return a ? a.getAttribute('href') : 'missing';
+		})()`)
+		if styleLinkHref != "/STYLE_GUIDE" {
+			t.Fatalf("E2E-CDP-01: expected sidebar link to /STYLE_GUIDE, got %q", styleLinkHref)
+		}
+		cdp.navigate(t, ts.URL+"/STYLE_GUIDE")
+		time.Sleep(150 * time.Millisecond)
+		stylePageCheck := cdp.evalString(t, `(() => {
+			const gov = document.getElementById('styleGuideGovernanceBanner');
+			const cfg = document.getElementById('activeBookConfigCard');
+			const active = document.querySelector('.book-sidebar .toc-item.active');
+			if (!gov || !cfg) return 'missing-governance-card';
+			if (!active || active.getAttribute('href') !== '/STYLE_GUIDE') return 'bad-active-link';
+			if (document.documentElement.scrollWidth > document.documentElement.clientWidth) {
+				return 'style-guide-overflow:' + document.documentElement.scrollWidth + '>' + document.documentElement.clientWidth;
+			}
+			return 'ok';
+		})()`)
+		if stylePageCheck != "ok" {
+			t.Fatalf("E2E-CDP-01 /STYLE_GUIDE check failed: %s", stylePageCheck)
+		}
 	})
 }

@@ -145,6 +145,11 @@
           <button class="studio-btn" onclick="copyTextFrom('prompt4', this)">Copy Prompt</button>
         </div>
 
+        <div class="prompt-card">
+          <div class="prompt-text" id="prompt5">“Read STYLE_GUIDE and BOOK_CONFIG, summarize our current editorial rules, and update banned_words or agent instructions if needed.”</div>
+          <button class="studio-btn" onclick="copyTextFrom('prompt5', this)">Copy Prompt</button>
+        </div>
+
         <!-- 6. ALL 13 TOOLS TABLE -->
         <h2>Complete Reference: All 13 MCP Tools</h2>
         <div class="table-scroll-wrap">
@@ -162,7 +167,7 @@
             </tr>
             <tr>
               <td><strong>read_chapter</strong></td>
-              <td>Reads the full Markdown text (including any inline <code>[TODO]</code> or <code>[Comment]</code> callouts), revision SHA/number (<code>r1..rN</code>), and lifecycle lineage status of any chapter, <code>SUMMARY</code>, or <code>STYLE_GUIDE</code>.</td>
+              <td>Reads the full Markdown or JSON text (including any inline <code>[TODO]</code> or <code>[Comment]</code> callouts), revision SHA/number (<code>r1..rN</code>), and lifecycle lineage status of any chapter, <code>SUMMARY</code>, <code>STYLE_GUIDE</code>, or <code>BOOK_CONFIG</code>.</td>
             </tr>
             <tr>
               <td><strong>search_book</strong></td>
@@ -170,7 +175,7 @@
             </tr>
             <tr>
               <td><strong>patch_chapter</strong></td>
-              <td>Applies a surgical search-and-replace edit (or multi-hunk <code>patches</code> array), auto-syncs H1 titles to <code>SUMMARY.md</code>, commits to Git under your name/email, and pushes to the remote repo.</td>
+              <td>Applies a surgical search-and-replace edit (or multi-hunk <code>patches</code> array) to chapters, <code>SUMMARY</code>, <code>STYLE_GUIDE</code>, or <code>BOOK_CONFIG</code>, auto-syncs H1 titles to <code>SUMMARY.md</code>, commits to Git under your name/email, and pushes to the remote repo.</td>
             </tr>
             <tr>
               <td><strong>create_chapter</strong></td>

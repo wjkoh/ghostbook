@@ -475,7 +475,7 @@ func NewHTTPHandler(eng *engine.BookEngine, opts ...HTTPHandlerOptions) http.Han
 	mux.Handle("/mcp", AuthMiddleware(eng, mcpHTTPHandler))
 	mux.Handle("/mcp/", AuthMiddleware(eng, mcpHTTPHandler))
 	mux.Handle(connectPath, AuthMiddleware(eng, connectHandler))
-	mux.HandleFunc("/openapi.json", ServeOpenAPISpec(eng.BaseURL(), eng.BookTitle(), cfg.AllowedHosts...))
+	mux.HandleFunc("/openapi.json", ServeOpenAPISpecWithTitleFn(eng.BaseURL(), eng.BookTitle, cfg.AllowedHosts...))
 	mux.HandleFunc("/api-docs", ServeOpenAPIDocs(eng))
 	mux.HandleFunc("/docs", ServeOpenAPIDocs(eng))
 	mux.Handle("/static/", http.StripPrefix("/static/", renderer.StaticAssetsHandler()))
@@ -1393,6 +1393,58 @@ func serveTimelineRSS(eng *engine.BookEngine, snap *renderer.RenderedBook, w htt
 	_, _ = w.Write(xmlBytes)
 }
 
+func serveBookConfigJSON(eng *engine.BookEngine, snap *renderer.RenderedBook, rev string, w http.ResponseWriter, r *http.Request) {
+	readOut, err := eng.ReadChapter(r.Context(), &engine.ReadChapterInput{
+		Slug:     "BOOK_CONFIG",
+		Revision: strings.TrimSpace(rev),
+	})
+	if err != nil {
+		writeEngineHTTPError(w, r, err)
+		return
+	}
+	if snap != nil && snap.HeadCommitSHA != "" {
+		w.Header().Set("X-Book-Head-Revision", snap.HeadCommitSHA)
+	}
+	if snap != nil && snap.HeadRevisionNumber > 0 {
+		w.Header().Set("X-Book-Head-Revision-Number", fmt.Sprintf("r%d", snap.HeadRevisionNumber))
+	}
+	if readOut.RevisionSHA != "" {
+		w.Header().Set("X-Book-Revision", readOut.RevisionSHA)
+	}
+	if readOut.RevisionNumber > 0 {
+		w.Header().Set("X-Book-Revision-Number", fmt.Sprintf("r%d", readOut.RevisionNumber))
+	}
+	rawBytes := []byte(readOut.ContentMarkdown)
+	etag := computeStrongETag(rawBytes)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Vary", "Accept, User-Agent")
+	if strings.TrimSpace(rev) != "" && isImmutableRevisionSpec(rev) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Link", buildDiscoveryLinkHeader("/STYLE_GUIDE", "text/html", "/book.json", "application/json"))
+	if r != nil && etagMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Length", strconv.Itoa(len(rawBytes)))
+	if r != nil && r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	_, _ = w.Write(rawBytes)
+}
+
+func isBookConfigAliasPath(cleanPath string) bool {
+	trimmed := strings.TrimPrefix(cleanPath, "/")
+	trimmed = strings.TrimPrefix(trimmed, "chapters/")
+	return strings.EqualFold(trimmed, "BOOK_CONFIG") ||
+		strings.EqualFold(trimmed, "book-config")
+}
+
 func serveWebStudio(eng *engine.BookEngine, urlPrefixStrip string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -1411,9 +1463,24 @@ func serveWebStudio(eng *engine.BookEngine, urlPrefixStrip string, w http.Respon
 		serveTimelineRSS(eng, snap, w, r)
 		return
 	}
+	queryRev := strings.TrimSpace(r.URL.Query().Get("rev"))
+	if cleanPath == "/book.json" {
+		serveBookConfigJSON(eng, snap, queryRev, w, r)
+		return
+	}
+	if strings.HasPrefix(cleanPath, "/rev/") && strings.HasSuffix(cleanPath, "/book.json") {
+		revPart := strings.TrimSuffix(strings.TrimPrefix(cleanPath, "/rev/"), "/book.json")
+		if revPart != "" && !strings.Contains(revPart, "/") {
+			serveBookConfigJSON(eng, snap, revPart, w, r)
+			return
+		}
+	}
+	if isBookConfigAliasPath(cleanPath) {
+		http.Redirect(w, r, "/book.json", http.StatusFound)
+		return
+	}
 	basePath, explicitFormat := detectPathFormatExtension(cleanPath)
 	wantsMarkdown, rawExact := negotiateResponseFormat(r, explicitFormat)
-	queryRev := strings.TrimSpace(r.URL.Query().Get("rev"))
 
 	switch {
 	case cleanPath == "/llms.txt" || (basePath == "/index" && explicitFormat != "html") || (basePath == "/" && wantsMarkdown):

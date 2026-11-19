@@ -19,12 +19,23 @@ func isMarkdownH1ToH3Line(trimmed string) bool {
 	return strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ")
 }
 
-// LintChapterMarkdown performs non-blocking editorial checks against STYLE_GUIDE.md:
-// - Rule 1: Headings (H1/H2/H3) should be concise (<= 42 characters after prefix).
-// - Rule 5: Suppress em dashes (—) in narrative prose.
-// - Optional Rule 6: Flag any configured banned words (matched on word boundaries).
+// LintChapterMarkdown performs non-blocking editorial checks against STYLE_GUIDE.md
+// using the default heading and em-dash rules plus any optional banned words.
 func LintChapterMarkdown(slug, md string, bannedWordsOpt ...[]string) []string {
-	if strings.EqualFold(slug, "STYLE_GUIDE") || strings.EqualFold(slug, "SUMMARY") {
+	cfg := EffectiveLintConfig{
+		MaxHeadingChars: DefaultMaxHeadingChars,
+		ForbidEmDash:    true,
+	}
+	if len(bannedWordsOpt) > 0 {
+		cfg.BannedWords = bannedWordsOpt[0]
+	}
+	return LintChapterMarkdownWithConfig(slug, md, cfg)
+}
+
+// LintChapterMarkdownWithConfig performs non-blocking editorial checks using the
+// active book-level EffectiveLintConfig resolved from defaults and optional src/book.json.
+func LintChapterMarkdownWithConfig(slug, md string, cfg EffectiveLintConfig) []string {
+	if strings.EqualFold(slug, "STYLE_GUIDE") || strings.EqualFold(slug, "SUMMARY") || strings.EqualFold(slug, "BOOK_CONFIG") {
 		return nil
 	}
 	type bannedPattern struct {
@@ -32,12 +43,10 @@ func LintChapterMarkdown(slug, md string, bannedWordsOpt ...[]string) []string {
 		re   *regexp.Regexp
 	}
 	var banned []bannedPattern
-	if len(bannedWordsOpt) > 0 {
-		for _, w := range bannedWordsOpt[0] {
-			if clean := strings.ToLower(strings.TrimSpace(w)); clean != "" {
-				if re, err := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(clean) + `\b`); err == nil {
-					banned = append(banned, bannedPattern{word: clean, re: re})
-				}
+	for _, w := range cfg.BannedWords {
+		if clean := strings.ToLower(strings.TrimSpace(w)); clean != "" {
+			if re, err := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(clean) + `\b`); err == nil {
+				banned = append(banned, bannedPattern{word: clean, re: re})
 			}
 		}
 	}
@@ -55,11 +64,11 @@ func LintChapterMarkdown(slug, md string, bannedWordsOpt ...[]string) []string {
 		if inFence || trimmed == "" {
 			continue
 		}
-		if isMarkdownH1ToH3Line(trimmed) {
+		if cfg.MaxHeadingChars > 0 && isMarkdownH1ToH3Line(trimmed) {
 			rawTitle := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
 			coreTitle := strings.TrimSpace(headingPrefixLintRe.ReplaceAllString(rawTitle, ""))
-			if utf8.RuneCountInString(coreTitle) > 42 {
-				warnings = append(warnings, fmt.Sprintf("Rule 1 (Concise Headings <= 42 chars): heading %q is %d chars after prefix", rawTitle, utf8.RuneCountInString(coreTitle)))
+			if utf8.RuneCountInString(coreTitle) > cfg.MaxHeadingChars {
+				warnings = append(warnings, fmt.Sprintf("Rule 1 (Concise Headings <= %d chars): heading %q is %d chars after prefix", cfg.MaxHeadingChars, rawTitle, utf8.RuneCountInString(coreTitle)))
 			}
 		}
 		for _, bp := range banned {
@@ -68,7 +77,7 @@ func LintChapterMarkdown(slug, md string, bannedWordsOpt ...[]string) []string {
 				warnings = append(warnings, fmt.Sprintf("Rule 6 (Terminology): avoid the configured banned term %q", bp.word))
 			}
 		}
-		if !emDashReported && !strings.HasPrefix(trimmed, "|") && strings.Contains(trimmed, "—") {
+		if cfg.ForbidEmDash && !emDashReported && !strings.HasPrefix(trimmed, "|") && strings.Contains(trimmed, "—") {
 			emDashReported = true
 			warnings = append(warnings, "Rule 5 (Punctuation Discipline): avoid em dashes (—) in narrative prose")
 		}
@@ -78,7 +87,8 @@ func LintChapterMarkdown(slug, md string, bannedWordsOpt ...[]string) []string {
 
 func buildInlineDiffPreview(slug string, hunks []ChapterPatchHunk) string {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "--- a/src/%s.md\n+++ b/src/%s.md\n", slug, slug)
+	relPath := srcRelPathForSlug(slug)
+	fmt.Fprintf(&buf, "--- a/%s\n+++ b/%s\n", relPath, relPath)
 	for _, h := range hunks {
 		fmt.Fprintf(&buf, "@@ surgical patch @@\n")
 		for _, line := range strings.Split(h.OldText, "\n") {
@@ -172,6 +182,30 @@ func collectPatchHunks(in *PatchChapterInput) ([]ChapterPatchHunk, error) {
 	return hunks, nil
 }
 
+func (e *BookEngine) verifyHeadRevisionLocked(expectedRaw, currentContent string) (string, error) {
+	headCommit, err := e.headCommitLocked()
+	if err != nil {
+		return "", err
+	}
+	currentHeadSHA := headCommit.Hash.String()
+	expected := strings.TrimSpace(strings.ToLower(expectedRaw))
+	if expected == "" {
+		return currentHeadSHA, nil
+	}
+	if _, isRevNum := parseRevisionNumber(expected); isRevNum && strings.HasPrefix(expected, "r") {
+		if resolved, rErr := e.resolveCommitByPrefixLocked(expected); rErr == nil {
+			if resolved.Hash.String() == currentHeadSHA {
+				return currentHeadSHA, nil
+			}
+		}
+	}
+	if len(expected) >= 4 && strings.HasPrefix(strings.ToLower(currentHeadSHA), expected) {
+		return currentHeadSHA, nil
+	}
+	return "", fmt.Errorf("%w: expected %s but repository HEAD is at revision %s (latest text: %s)",
+		ErrRevisionConflict, expected, shortSHA(currentHeadSHA), truncateUTF8(currentContent, 400))
+}
+
 func (e *BookEngine) PatchChapter(ctx context.Context, in *PatchChapterInput) (*PatchChapterOutput, error) {
 	if in == nil {
 		return nil, fmt.Errorf("%w: nil input", ErrInvalidArgument)
@@ -193,17 +227,33 @@ func (e *BookEngine) PatchChapter(ctx context.Context, in *PatchChapterInput) (*
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	relPath := filepath.ToSlash(filepath.Join("src", slug+".md"))
-	rawBytes, err := e.readSrcFileSafe(slug + ".md")
+	filename := srcFilenameForSlug(slug)
+	relPath := srcRelPathForSlug(slug)
+	fullPath := filepath.Join(e.repoDir, "src", filename)
+	existedOnDisk := true
+	rawBytes, err := e.readSrcFileSafe(filename)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) && (slug == "BOOK_CONFIG" || slug == "STYLE_GUIDE") {
+			existedOnDisk = false
+			if slug == "BOOK_CONFIG" {
+				rawBytes = []byte(FormatEffectiveBookConfigJSON(e.EffectiveConfig()))
+			} else {
+				rawBytes = []byte(strings.TrimSpace(defaultStyleGuideMarkdown) + "\n")
+			}
+		} else if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, slug)
+		} else {
+			return nil, err
 		}
-		return nil, err
 	}
 	currentContent := string(rawBytes)
 
-	currentFileSHA, err := e.verifyOptimisticRevisionLocked(relPath, in.ExpectedRevisionSHA, currentContent)
+	var currentFileSHA string
+	if existedOnDisk {
+		currentFileSHA, err = e.verifyOptimisticRevisionLocked(relPath, in.ExpectedRevisionSHA, currentContent)
+	} else {
+		currentFileSHA, err = e.verifyHeadRevisionLocked(in.ExpectedRevisionSHA, currentContent)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -218,10 +268,15 @@ func (e *BookEngine) PatchChapter(ctx context.Context, in *PatchChapterInput) (*
 		updatedContent = nextContent
 		appliedHunks = append(appliedHunks, ChapterPatchHunk{OldText: diffOld, NewText: h.NewText})
 	}
-	if updatedContent == currentContent {
+	if existedOnDisk && updatedContent == currentContent {
 		return nil, fmt.Errorf("%w: patch produced no changes in %s", ErrInvalidArgument, slug)
 	}
-	if err := e.writeSrcFileSafe(slug+".md", []byte(updatedContent)); err != nil {
+	if slug == "BOOK_CONFIG" {
+		if _, valErr := ParseAndValidateBookConfig([]byte(updatedContent)); valErr != nil {
+			return nil, valErr
+		}
+	}
+	if err := e.writeSrcFileSafe(filename, []byte(updatedContent)); err != nil {
 		return nil, err
 	}
 
@@ -245,7 +300,11 @@ func (e *BookEngine) PatchChapter(ctx context.Context, in *PatchChapterInput) (*
 
 	newFullSHA, err := e.commitPathsLocked(author, commitMsg, commitPaths...)
 	if err != nil {
-		e.resetWorktreeLocked()
+		if !existedOnDisk {
+			e.resetWorktreeLocked(fullPath)
+		} else {
+			e.resetWorktreeLocked()
+		}
 		return nil, err
 	}
 	if err := e.rebuildSnapshotAndFTSLocked(context.WithoutCancel(ctx)); err != nil {
@@ -267,8 +326,8 @@ func (e *BookEngine) PatchChapter(ctx context.Context, in *PatchChapterInput) (*
 		NewRevisionSHA: shortNewSHA,
 		CommittedBy:    fmt.Sprintf("%s <%s>", author.DisplayName, author.GitEmail),
 		DiffPreview:    buildInlineDiffPreview(slug, appliedHunks),
-		LiveChapterURL: fmt.Sprintf("%s/chapters/%s", e.baseURL, slug),
-		StyleWarnings:  LintChapterMarkdown(slug, updatedContent, e.BannedWords()),
+		LiveChapterURL: e.liveURLForSlug(slug),
+		StyleWarnings:  LintChapterMarkdownWithConfig(slug, updatedContent, e.LintConfig()),
 	}, nil
 }
 
@@ -338,8 +397,8 @@ func (e *BookEngine) CreateChapter(ctx context.Context, in *CreateChapterInput) 
 	return &CreateChapterOutput{
 		Slug:           slug,
 		NewRevisionSHA: shortNewSHA,
-		LiveChapterURL: fmt.Sprintf("%s/chapters/%s", e.baseURL, slug),
-		StyleWarnings:  LintChapterMarkdown(slug, body, e.BannedWords()),
+		LiveChapterURL: e.liveURLForSlug(slug),
+		StyleWarnings:  LintChapterMarkdownWithConfig(slug, body, e.LintConfig()),
 	}, nil
 }
 
@@ -347,7 +406,7 @@ func (e *BookEngine) RevertChapterRevision(ctx context.Context, in *RevertChapte
 	if in == nil {
 		return nil, fmt.Errorf("%w: nil input", ErrInvalidArgument)
 	}
-	slug, err := ValidateSlug(in.Slug)
+	slug, isMeta, err := NormalizeChapterOrMetaSlug(in.Slug)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +423,8 @@ func (e *BookEngine) RevertChapterRevision(ctx context.Context, in *RevertChapte
 		return nil, err
 	}
 
-	relPath := filepath.ToSlash(filepath.Join("src", slug+".md"))
+	filename := srcFilenameForSlug(slug)
+	relPath := srcRelPathForSlug(slug)
 	fileObj, err := targetCommit.File(relPath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s at commit %s", ErrNotFound, slug, in.TargetCommitSHA)
@@ -373,33 +433,40 @@ func (e *BookEngine) RevertChapterRevision(ctx context.Context, in *RevertChapte
 	if err != nil {
 		return nil, err
 	}
+	if slug == "BOOK_CONFIG" {
+		if _, valErr := ParseAndValidateBookConfig([]byte(historicalContent)); valErr != nil {
+			return nil, valErr
+		}
+	}
 
-	fullPath := filepath.Join(e.repoDir, "src", slug+".md")
+	fullPath := filepath.Join(e.repoDir, "src", filename)
 	_, existedBefore := os.Stat(fullPath)
-	if currentBytes, readErr := e.readSrcFileSafe(slug + ".md"); readErr == nil && string(currentBytes) == historicalContent {
+	if currentBytes, readErr := e.readSrcFileSafe(filename); readErr == nil && string(currentBytes) == historicalContent {
 		return nil, fmt.Errorf("%w: chapter %s is already identical to revision %s", ErrInvalidArgument, slug, shortSHA(targetCommit.Hash.String()))
 	}
-	if err := e.writeSrcFileSafe(slug+".md", []byte(historicalContent)); err != nil {
+	if err := e.writeSrcFileSafe(filename, []byte(historicalContent)); err != nil {
 		return nil, err
 	}
 
 	commitPaths := []string{relPath}
-	if rawSummary, sumErr := e.readSrcFileSafe("SUMMARY.md"); sumErr == nil {
-		restoredTitle := extractMarkdownH1(historicalContent)
-		if restoredTitle == "" {
-			restoredTitle = slug
-		}
-		updatedSummary := rewriteSummaryForRename(string(rawSummary), slug, slug, restoredTitle)
-		if updatedSummary != string(rawSummary) {
-			if err := e.writeSrcFileSafe("SUMMARY.md", []byte(updatedSummary)); err != nil {
-				if os.IsNotExist(existedBefore) {
-					e.resetWorktreeLocked(fullPath)
-				} else {
-					e.resetWorktreeLocked()
-				}
-				return nil, err
+	if !isMeta {
+		if rawSummary, sumErr := e.readSrcFileSafe("SUMMARY.md"); sumErr == nil {
+			restoredTitle := extractMarkdownH1(historicalContent)
+			if restoredTitle == "" {
+				restoredTitle = slug
 			}
-			commitPaths = append(commitPaths, "src/SUMMARY.md")
+			updatedSummary := rewriteSummaryForRename(string(rawSummary), slug, slug, restoredTitle)
+			if updatedSummary != string(rawSummary) {
+				if err := e.writeSrcFileSafe("SUMMARY.md", []byte(updatedSummary)); err != nil {
+					if os.IsNotExist(existedBefore) {
+						e.resetWorktreeLocked(fullPath)
+					} else {
+						e.resetWorktreeLocked()
+					}
+					return nil, err
+				}
+				commitPaths = append(commitPaths, "src/SUMMARY.md")
+			}
 		}
 	}
 
@@ -432,7 +499,7 @@ func (e *BookEngine) RevertChapterRevision(ctx context.Context, in *RevertChapte
 	return &RevertChapterRevisionOutput{
 		Slug:           slug,
 		NewRevisionSHA: shortNewSHA,
-		LiveChapterURL: fmt.Sprintf("%s/chapters/%s", e.baseURL, slug),
+		LiveChapterURL: e.liveURLForSlug(slug),
 	}, nil
 }
 

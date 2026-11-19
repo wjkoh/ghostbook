@@ -404,3 +404,45 @@ func TestMinorSkipSafetyGuardAndVertexOAuth2Caching_UT_TL_04(t *testing.T) {
 		t.Fatalf("expected cached OAuth2 token across calls, got %d token exchanges", tokenCalls.Load())
 	}
 }
+
+func TestBriefingPromptGuidanceFromBookConfig_UT_CFG_08(t *testing.T) {
+	ctx := context.Background()
+	eng, _ := setupTestEngine(t)
+
+	if _, err := eng.PatchChapter(ctx, &engine.PatchChapterInput{
+		Slug:          "BOOK_CONFIG",
+		OldText:       `"prompt_guidance": ""`,
+		NewText:       `"prompt_guidance": "Prefer WAL and Raft vocabulary over generic storage wording."`,
+		CommitMessage: "Configure timeline prompt guidance",
+	}); err != nil {
+		t.Fatalf("PatchChapter(BOOK_CONFIG): %v", err)
+	}
+	if _, err := eng.PatchChapter(ctx, &engine.PatchChapterInput{
+		Slug:          "01-system-architecture",
+		OldText:       "Goldmark SSR rendering",
+		NewText:       "Goldmark SSR HTML rendering",
+		CommitMessage: "Refine rendering overview",
+	}); err != nil {
+		t.Fatalf("PatchChapter(01-system-architecture): %v", err)
+	}
+
+	var capturedPrompt string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		capturedPrompt = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"milestones\":[{\"revisions\":[3],\"title\":\"Rendering Overview\",\"summary\":\"Clarified Goldmark SSR HTML rendering.\",\"chapter_slugs\":[\"01-system-architecture\"],\"authors\":[\"Alice Chen\"]}]}"}]}}]}`))
+	}))
+	defer srv.Close()
+
+	eng.SetBriefSynthesizer(engine.NewBriefSynthesizer("gm_guidance_key", "gemini-2.5-flash", srv.URL))
+	if _, err := eng.SynthesizeBriefingIfNeeded(ctx); err != nil {
+		t.Fatalf("SynthesizeBriefingIfNeeded: %v", err)
+	}
+	if !strings.Contains(capturedPrompt, "book_editorial_guidance") || !strings.Contains(capturedPrompt, "Prefer WAL and Raft vocabulary") {
+		t.Fatalf("expected timeline prompt to include book_editorial_guidance block, got:\n%s", capturedPrompt)
+	}
+	if strings.Contains(capturedPrompt, "[BOOK_CONFIG]") {
+		t.Fatalf("expected src/book.json diff omitted from timeline commit excerpts:\n%s", capturedPrompt)
+	}
+}

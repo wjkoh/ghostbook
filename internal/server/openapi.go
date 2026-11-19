@@ -69,9 +69,9 @@ func buildOpenAPISpecDocument(baseURL, bookTitle string) map[string]any {
 		"Reading & Search",
 		"ReadChapter",
 		"Read chapter Markdown and permalink revision state",
-		"Reads full Markdown prose, revision number/SHA, and permalink lineage state (current, outdated, renamed, moved, deleted) for any chapter, SUMMARY, or STYLE_GUIDE.",
+		"Reads full Markdown prose or JSON config, revision number/SHA, and permalink lineage state (current, outdated, renamed, moved, deleted) for any chapter, SUMMARY, STYLE_GUIDE, or BOOK_CONFIG.",
 		map[string]any{
-			"slug":     prop{"type": "string", "description": "Chapter or meta slug (e.g. 01-system-architecture, SUMMARY, STYLE_GUIDE)", "example": "01-system-architecture"},
+			"slug":     prop{"type": "string", "description": "Chapter or meta slug (e.g. 01-system-architecture, SUMMARY, STYLE_GUIDE, BOOK_CONFIG)", "example": "01-system-architecture"},
 			"revision": prop{"type": "string", "description": "Optional commit SHA (e.g. 6ca162a) or sequential revision number (e.g. r1, r2) to read a historical permalink revision"},
 		},
 		[]string{"slug"},
@@ -98,7 +98,7 @@ func buildOpenAPISpecDocument(baseURL, bookTitle string) map[string]any {
 		"Apply surgical search-and-replace or multi-hunk edits to a chapter",
 		"Applies old_text -> new_text or an atomic patches[] array, commits to Git via go-git under the authenticated author, updates FTS5, and returns style_warnings.",
 		map[string]any{
-			"slug":                  prop{"type": "string", "description": "Target chapter slug (or SUMMARY / STYLE_GUIDE)", "example": "01-system-architecture"},
+			"slug":                  prop{"type": "string", "description": "Target chapter or meta slug (or SUMMARY / STYLE_GUIDE / BOOK_CONFIG)", "example": "01-system-architecture"},
 			"old_text":              prop{"type": "string", "description": "Exact contiguous Markdown text to replace (optional when patches is provided)"},
 			"new_text":              prop{"type": "string", "description": "Replacement Markdown text (optional when patches is provided)"},
 			"patches":               prop{"type": "array", "description": "Optional array of surgical {old_text, new_text} hunks applied atomically in one commit", "items": map[string]any{"type": "object", "properties": map[string]any{"old_text": prop{"type": "string"}, "new_text": prop{"type": "string"}}}},
@@ -246,7 +246,7 @@ func buildOpenAPISpecDocument(baseURL, bookTitle string) map[string]any {
 		"info": map[string]any{
 			"title":       bookTitle + " · API Reference",
 			"version":     "1.0.0",
-			"description": "ConnectRPC HTTP/JSON, Remote MCP, and Zero-HTML Raw Markdown interface for collaborative reading and AI-agent authoring of " + bookTitle + " (13 operations mirroring MCP 1-for-1).\n\n### Zero-HTML HTTP Raw Markdown, RSS & Agent Discovery (Read-Only)\n- **Discovery Index (`llms.txt`):** `GET /llms.txt` (or `GET /` with `Accept: text/markdown`)\n- **Full Book Raw Markdown (`llms-full.txt` / `book.md`):** `GET /llms-full.txt`, `GET /book.md`, or historical `GET /rev/{rev}/book.md`\n- **Live Chapter Raw Markdown:** `GET /chapters/{slug}.md`, `GET /{slug}.md`, or `GET /chapters/{slug}` with `Accept: text/markdown`\n- **Permalink Chapter Raw Markdown:** `GET /rev/{rev}/chapters/{slug}.md`, `GET /chapters/{slug}/rev/{rev}.md`, `GET /chapters/{slug}@{rev}.md` (append `?raw=exact` for unannotated historical bytes)\n- **Editorial Timeline RSS 2.0:** `GET /feed.xml` (aliases: `/rss.xml`, `/timeline.xml`)\n- **Meta & Audit Markdown:** `GET /timeline.md`, `GET /SUMMARY.md`, `GET /STYLE_GUIDE.md`, `GET /changelog.md`, `GET /guide.md`\n- **Mermaid Diagram Source:** `GET /chapters/{slug}/diagrams/{n}.mmd`",
+			"description": "ConnectRPC HTTP/JSON, Remote MCP, and Zero-HTML Raw Markdown interface for collaborative reading and AI-agent authoring of " + bookTitle + " (13 operations mirroring MCP 1-for-1).\n\n### Zero-HTML HTTP Raw Markdown, RSS & Agent Discovery (Read-Only)\n- **Discovery Index (`llms.txt`):** `GET /llms.txt` (or `GET /` with `Accept: text/markdown`)\n- **Full Book Raw Markdown (`llms-full.txt` / `book.md`):** `GET /llms-full.txt`, `GET /book.md`, or historical `GET /rev/{rev}/book.md`\n- **Live Chapter Raw Markdown:** `GET /chapters/{slug}.md`, `GET /{slug}.md`, or `GET /chapters/{slug}` with `Accept: text/markdown`\n- **Permalink Chapter Raw Markdown:** `GET /rev/{rev}/chapters/{slug}.md`, `GET /chapters/{slug}/rev/{rev}.md`, `GET /chapters/{slug}@{rev}.md` (append `?raw=exact` for unannotated historical bytes)\n- **Editorial Timeline RSS 2.0:** `GET /feed.xml` (aliases: `/rss.xml`, `/timeline.xml`)\n- **Meta & Audit Documents:** `GET /timeline.md`, `GET /SUMMARY.md`, `GET /STYLE_GUIDE.md`, `GET /book.json`, `GET /changelog.md`, `GET /guide.md`\n- **Mermaid Diagram Source:** `GET /chapters/{slug}/diagrams/{n}.mmd`",
 		},
 		"tags": []map[string]any{
 			{"name": "Reading & Search", "description": "Inspect the Table of Contents, read chapter Markdown, and run SQLite FTS5 BM25 + line queries."},
@@ -315,17 +315,24 @@ func resolveSafeOpenAPIServerURL(baseURL string, allowedHosts []string, r *http.
 }
 
 func ServeOpenAPISpec(baseURL string, bookTitle string, allowedHosts ...string) http.HandlerFunc {
-	if strings.TrimSpace(bookTitle) == "" {
-		bookTitle = "Ghostbook"
-	}
-	spec := buildOpenAPISpecDocument(baseURL, bookTitle)
+	return ServeOpenAPISpecWithTitleFn(baseURL, func() string { return bookTitle }, allowedHosts...)
+}
 
+func ServeOpenAPISpecWithTitleFn(baseURL string, titleFn func() string, allowedHosts ...string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		bookTitle := ""
+		if titleFn != nil {
+			bookTitle = strings.TrimSpace(titleFn())
+		}
+		if bookTitle == "" {
+			bookTitle = "Ghostbook"
+		}
+		spec := buildOpenAPISpecDocument(baseURL, bookTitle)
 		serverURL := resolveSafeOpenAPIServerURL(baseURL, allowedHosts, r)
 		doc := map[string]any{
 			"openapi":    spec["openapi"],
@@ -363,12 +370,6 @@ func ServeOpenAPIDocs(engOpt ...*engine.BookEngine) http.HandlerFunc {
 	if len(engOpt) > 0 {
 		eng = engOpt[0]
 	}
-	baseURL := ""
-	bookTitle := "Ghostbook"
-	if eng != nil {
-		baseURL = eng.BaseURL()
-		bookTitle = eng.BookTitle()
-	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -386,6 +387,12 @@ func ServeOpenAPIDocs(engOpt ...*engine.BookEngine) http.HandlerFunc {
 			}
 			writeMarkdownExportResult(w, r, res, false, "/api-docs", "/guide.md")
 			return
+		}
+		baseURL := ""
+		bookTitle := "Ghostbook"
+		if eng != nil {
+			baseURL = eng.BaseURL()
+			bookTitle = eng.BookTitle()
 		}
 		w.Header().Set("Content-Security-Policy", APIDocsContentSecurityPolicy)
 		out, err := renderer.RenderAPIDocsPageWithSpec(renderer.APIDocsPageData{

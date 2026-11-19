@@ -381,4 +381,45 @@ func TestSuiteA_MarkdownExportEngine_UT_MD_ENG_01_to_08(t *testing.T) {
 
 		wg.Wait()
 	})
+
+	t.Run("UT-CFG-09_BookConfigHistoricalExportChangelogAndLLMsIndex", func(t *testing.T) {
+		eng, _ := setupTestEngine(t)
+		r1Title := eng.BookTitle()
+
+		patchOut, err := eng.PatchChapter(ctx, &engine.PatchChapterInput{
+			Slug:          "BOOK_CONFIG",
+			OldText:       `"title": "Ghostbook"`,
+			NewText:       `"title": "Distributed Systems Handbook"`,
+			CommitMessage: "Set custom handbook title in src/book.json",
+		})
+		if err != nil {
+			t.Fatalf("PatchChapter(BOOK_CONFIG): %v", err)
+		}
+
+		// Historical r1 snapshot still reflects r1 baseline title; HEAD reflects new book.json title
+		histBook, err := eng.RenderBookAtRevision("r1")
+		if err != nil {
+			t.Fatalf("RenderBookAtRevision(r1): %v", err)
+		}
+		if histBook.BookTitle != r1Title {
+			t.Fatalf("expected r1 historical title %q, got %q", r1Title, histBook.BookTitle)
+		}
+
+		llms, err := eng.AssembleLLMsIndex(ctx, "")
+		if err != nil {
+			t.Fatalf("AssembleLLMsIndex: %v", err)
+		}
+		if !strings.Contains(llms.Markdown, "# Distributed Systems Handbook") || !strings.Contains(llms.Markdown, "https://docs.example.com/book.json") {
+			t.Fatalf("expected updated title and /book.json in /llms.txt:\n%s", llms.Markdown)
+		}
+
+		cl, err := eng.AssembleChangelogMarkdown(ctx)
+		if err != nil {
+			t.Fatalf("AssembleChangelogMarkdown: %v", err)
+		}
+		wantLink := "[src/book.json](https://docs.example.com/rev/" + patchOut.NewRevisionSHA + "/book.json)"
+		if !strings.Contains(cl.Markdown, wantLink) {
+			t.Fatalf("expected changelog.md to link %q:\n%s", wantLink, cl.Markdown)
+		}
+	})
 }

@@ -192,7 +192,7 @@ func NewMCPServer(eng *engine.BookEngine) *mcp.Server {
 
 	registerMCPTool(s, eng,
 		"read_chapter",
-		"Read the full Markdown prose and current Git revision SHA of a chapter by slug (or SUMMARY / STYLE_GUIDE).",
+		"Read the full Markdown prose or JSON config and current Git revision SHA of a chapter by slug (or SUMMARY / STYLE_GUIDE / BOOK_CONFIG).",
 		eng.ReadChapter,
 		func(in *engine.ReadChapterInput, out *engine.ReadChapterOutput) (string, string) {
 			if out != nil {
@@ -213,7 +213,7 @@ func NewMCPServer(eng *engine.BookEngine) *mcp.Server {
 
 	registerMCPTool(s, eng,
 		"patch_chapter",
-		"Apply a surgical search-and-replace edit (or multi-hunk patches array) to a chapter, commit to Git via go-git under the author's identity, update FTS5, and re-render the live book.",
+		"Apply a surgical search-and-replace edit (or multi-hunk patches array) to a chapter or meta-file (SUMMARY, STYLE_GUIDE, BOOK_CONFIG), commit to Git via go-git under the author's identity, update FTS5, and re-render the live book.",
 		eng.PatchChapter,
 		func(in *engine.PatchChapterInput, out *engine.PatchChapterOutput) (string, string) {
 			if out != nil {

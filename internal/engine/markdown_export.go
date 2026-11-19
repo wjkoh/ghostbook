@@ -43,6 +43,7 @@ type exportedBookSnapshot struct {
 	HeadSHA            string
 	HeadRevisionNumber int32
 	IsLatest           bool
+	EffectiveConfig    EffectiveBookConfig
 	SummaryMarkdown    string
 	Chapters           []exportedChapter
 	TotalWords         int32
@@ -133,6 +134,7 @@ func (e *BookEngine) collectBookAtRevision(revSpec string) (*exportedBookSnapsho
 			HeadSHA:            snap.HeadCommitSHA,
 			HeadRevisionNumber: snap.HeadRevisionNumber,
 			IsLatest:           true,
+			EffectiveConfig:    e.EffectiveConfig(),
 			SummaryMarkdown:    snap.SummaryMarkdown,
 			Chapters:           chapters,
 			TotalWords:         totalWords,
@@ -271,6 +273,11 @@ func (e *BookEngine) collectBookAtRevision(revSpec string) (*exportedBookSnapsho
 	if targetRevNum <= 0 {
 		targetRevNum = 1
 	}
+	var histConfigRaw []byte
+	if cfgText, ok := readFileAtCommit(targetCommit, "src/book.json"); ok {
+		histConfigRaw = []byte(cfgText)
+	}
+	histEffCfg, _ := ResolveEffectiveBookConfig(e.cfg, histConfigRaw)
 
 	return &exportedBookSnapshot{
 		RevisionSHA:        targetSHA,
@@ -278,6 +285,7 @@ func (e *BookEngine) collectBookAtRevision(revSpec string) (*exportedBookSnapsho
 		HeadSHA:            headSHA,
 		HeadRevisionNumber: headRevNum,
 		IsLatest:           targetCommit.Hash == headCommit.Hash,
+		EffectiveConfig:    histEffCfg,
 		SummaryMarkdown:    summaryText,
 		Chapters:           chapters,
 		TotalWords:         totalWords,
@@ -347,10 +355,10 @@ func (e *BookEngine) RenderBookAtRevision(revSpec string) (*renderer.RenderedBoo
 		}
 	}
 	book := &renderer.RenderedBook{
-		BookTitle:          e.BookTitle(),
-		BookKicker:         e.BookKicker(),
+		BookTitle:          exp.EffectiveConfig.BookTitle,
+		BookKicker:         exp.EffectiveConfig.BookKicker,
 		MCPName:            e.MCPName(),
-		HidePoweredBy:      e.cfg.HidePoweredBy,
+		HidePoweredBy:      exp.EffectiveConfig.HidePoweredBy,
 		Authors:            authorViews,
 		HeadCommitSHA:      exp.RevisionSHA,
 		HeadRevisionNumber: exp.RevisionNumber,
@@ -371,10 +379,10 @@ func (e *BookEngine) AssembleLLMsIndex(_ context.Context, revSpec string) (*Mark
 	base := e.BaseURL()
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# %s\n\n", e.BookTitle())
+	fmt.Fprintf(&b, "# %s\n\n", book.EffectiveConfig.BookTitle)
 	if book.IsLatest {
 		kickerClause := ""
-		if k := strings.TrimSpace(e.BookKicker()); k != "" && !strings.EqualFold(k, "Living Book") {
+		if k := strings.TrimSpace(book.EffectiveConfig.BookKicker); k != "" && !strings.EqualFold(k, "Living Book") {
 			kickerClause = " (" + k + ")"
 		}
 		fmt.Fprintf(&b, "> Canonical Git-backed living book%s. Current HEAD revision: r%d (%s) · %d chapters · %d words.\n\n", kickerClause,
@@ -385,7 +393,7 @@ func (e *BookEngine) AssembleLLMsIndex(_ context.Context, revSpec string) (*Mark
 			b.WriteString("\n")
 		}
 	} else {
-		fmt.Fprintf(&b, "> Historical Snapshot of %s pinned to revision r%d (%s) · %d chapters · %d words. Newer HEAD revision r%d (%s) is available at %s/llms.txt.\n\n", e.BookTitle(),
+		fmt.Fprintf(&b, "> Historical Snapshot of %s pinned to revision r%d (%s) · %d chapters · %d words. Newer HEAD revision r%d (%s) is available at %s/llms.txt.\n\n", book.EffectiveConfig.BookTitle,
 			book.RevisionNumber, book.RevisionSHA, len(book.Chapters), book.TotalWords,
 			book.HeadRevisionNumber, book.HeadSHA, base)
 	}
@@ -426,13 +434,14 @@ func (e *BookEngine) AssembleLLMsIndex(_ context.Context, revSpec string) (*Mark
 
 	b.WriteString("## Meta Documents & Agent Protocols\n\n")
 	fmt.Fprintf(&b, "- [Raw Table of Contents (SUMMARY.md)](%s/SUMMARY.md): GitBook/mdBook chapter hierarchy manifest.\n", base)
-	fmt.Fprintf(&b, "- [Editorial Style Guide (STYLE_GUIDE.md)](%s/STYLE_GUIDE.md): Strunk & White prose, math, and formatting standards.\n", base)
+	fmt.Fprintf(&b, "- [Editorial Style Guide (STYLE_GUIDE.md)](%s/STYLE_GUIDE.md): Prose, math, formatting, and live MCP agent rules.\n", base)
+	fmt.Fprintf(&b, "- [Book Configuration (book.json)](%s/book.json): Active title, kicker, linter toggles, banned words, and timeline guidance.\n", base)
 	fmt.Fprintf(&b, "- [Editorial Timeline RSS Feed (feed.xml)](%s/feed.xml): RSS 2.0 subscription feed of synthesized Timeline milestones (aliases: /timeline.xml, /rss.xml).\n", base)
 	fmt.Fprintf(&b, "- [Git Commit Log (changelog.md)](%s/changelog.md): Chronological Git commits r1..r%d with modified files.\n", base, book.HeadRevisionNumber)
 	fmt.Fprintf(&b, "- [Co-Author AI & MCP Setup Guide (guide.md)](%s/guide.md): Instructions for HTTP raw Markdown, Accept: text/markdown content negotiation, Remote MCP, and ConnectRPC.\n", base)
 	fmt.Fprintf(&b, "- [OpenAPI 3.1 Specification (openapi.json)](%s/openapi.json): Machine-readable ConnectRPC JSON schema for authenticated authoring.\n", base)
 	fmt.Fprintf(&b, "- Remote MCP Endpoint: %s/u/<email>:<secret-key>/mcp\n", base)
-	if extra := e.ExtraLLMsMarkdown(); extra != "" {
+	if extra := strings.TrimSpace(book.EffectiveConfig.ExtraLLMsMarkdown); extra != "" {
 		if !strings.HasPrefix(extra, "- ") && !strings.HasPrefix(extra, "* ") {
 			b.WriteByte('\n')
 		}
@@ -464,7 +473,7 @@ func (e *BookEngine) AssembleFullBookMarkdown(_ context.Context, revSpec string)
 	base := e.BaseURL()
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# %s (Complete Raw Markdown Edition)\n\n", e.BookTitle())
+	fmt.Fprintf(&b, "# %s (Complete Raw Markdown Edition)\n\n", book.EffectiveConfig.BookTitle)
 	if !book.IsLatest {
 		fmt.Fprintf(&b, "> [!WARNING]\n> **Historical Whole-Book Snapshot:** Viewing revision **r%d (%s)**. Newer HEAD revision **r%d (%s)** is available at %s/book.md (and %s/llms-full.txt).\n\n",
 			book.RevisionNumber, book.RevisionSHA, book.HeadRevisionNumber, book.HeadSHA, base, base)
@@ -564,6 +573,8 @@ func (e *BookEngine) AssembleChangelogMarkdown(_ context.Context) (*MarkdownExpo
 				} else {
 					fileLinks = append(fileLinks, fmt.Sprintf("[%s](%s/rev/%s/chapters/%s.md)", slug, base, c.ShortSHA, slug))
 				}
+			} else if f == "src/book.json" {
+				fileLinks = append(fileLinks, fmt.Sprintf("[%s](%s/rev/%s/book.json)", f, base, c.ShortSHA))
 			} else {
 				fileLinks = append(fileLinks, f)
 			}
@@ -876,7 +887,7 @@ func (e *BookEngine) AssembleGuideMarkdown(_ context.Context) (*MarkdownExportRe
 	fmt.Fprintf(&b, "- **Full Book in One Request:** %s/llms-full.txt or %s/book.md (historical snapshot: %s/rev/r1/book.md)\n", base, base, base)
 	fmt.Fprintf(&b, "- **Live Chapter Raw Markdown:** %s/chapters/{slug}.md (or GET %s/chapters/{slug} with Accept: text/markdown)\n", base, base)
 	fmt.Fprintf(&b, "- **Pinned Permalink Raw Markdown:** %s/rev/{rev}/chapters/{slug}.md or %s/chapters/{slug}/rev/{rev}.md (append ?raw=exact to omit lineage banner)\n", base, base)
-	fmt.Fprintf(&b, "- **Meta & Audit Documents:** %s/timeline.md · %s/SUMMARY.md · %s/STYLE_GUIDE.md · %s/changelog.md\n", base, base, base, base)
+	fmt.Fprintf(&b, "- **Meta & Audit Documents:** %s/timeline.md · %s/SUMMARY.md · %s/STYLE_GUIDE.md · %s/book.json · %s/changelog.md\n", base, base, base, base, base)
 	fmt.Fprintf(&b, "- **Mermaid Diagram Source:** %s/chapters/{slug}/diagrams/{n}.mmd\n\n", base)
 
 	b.WriteString("## 2. Remote Model Context Protocol (Authenticated Read/Write Co-Authoring)\n\n")
@@ -888,9 +899,9 @@ func (e *BookEngine) AssembleGuideMarkdown(_ context.Context) (*MarkdownExportRe
 	b.WriteString("| Tool Name | Capability |\n")
 	b.WriteString("| :--- | :--- |\n")
 	b.WriteString("| **get_table_of_contents** | Returns SUMMARY.md, chapter word counts, last author, and live + permalink URLs. |\n")
-	b.WriteString("| **read_chapter** | Reads full raw Markdown, revision SHA/number (r1..rN), and lineage status of any chapter, SUMMARY, or STYLE_GUIDE. |\n")
+	b.WriteString("| **read_chapter** | Reads full raw Markdown or JSON, revision SHA/number (r1..rN), and lineage status of any chapter, SUMMARY, STYLE_GUIDE, or BOOK_CONFIG. |\n")
 	b.WriteString("| **search_book** | Searches chapters via SQLite FTS5 BM25 ranking plus 1-based exact line matching. |\n")
-	b.WriteString("| **patch_chapter** | Applies surgical search-and-replace edits (or multi-hunk patches), auto-syncs H1 titles to SUMMARY.md, and commits to Git. |\n")
+	b.WriteString("| **patch_chapter** | Applies surgical search-and-replace edits (or multi-hunk patches) to chapters, SUMMARY, STYLE_GUIDE, or BOOK_CONFIG, auto-syncs H1 titles to SUMMARY.md, and commits to Git. |\n")
 	b.WriteString("| **create_chapter** | Creates a new chapter file, registers it in SUMMARY.md, commits to Git, and indexes in FTS5. |\n")
 	b.WriteString("| **rename_chapter** | Renames or moves a chapter slug and/or H1 title and updates SUMMARY.md and cross-chapter links. |\n")
 	b.WriteString("| **delete_chapter** | Removes a chapter from SUMMARY.md while preserving historical revision permalinks and optional replacement link. |\n")

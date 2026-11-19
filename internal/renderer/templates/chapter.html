@@ -23,7 +23,7 @@
       </div>
 
       <div class="topbar-right">
-        {{if and (ne .ActiveChapter.LifecycleStatus "deleted") (ne .ActiveChapter.LifecycleStatus "moved") (ne .ActiveChapter.Slug "SUMMARY") (ne .ActiveChapter.Slug "STYLE_GUIDE")}}
+        {{if and (ne .ActiveChapter.LifecycleStatus "deleted") (ne .ActiveChapter.LifecycleStatus "moved") (ne .ActiveChapter.Slug "SUMMARY") (ne .ActiveChapter.Slug "STYLE_GUIDE") (ne .ActiveChapter.Slug "BOOK_CONFIG")}}
         <a href="/chapters/{{.ActiveChapter.Slug}}/history" class="studio-btn" id="linkChapterHistory">
           History &amp; Blame
         </a>
@@ -108,6 +108,53 @@
           <button class="provenance-chip" id="btnCopyPermalink" onclick="copyChapterPermalink()" title="Copy permanent link to revision r{{.ActiveChapter.RevisionNumber}} ({{.ActiveChapter.LastCommitSHA}})">🔗 Copy Permalink</button>
         </div>
       </div>
+
+      {{if eq .ActiveChapter.Slug "STYLE_GUIDE"}}
+      <section class="style-governance-card" id="styleGuideGovernanceBanner">
+        <div class="style-governance-header">
+          <div>
+            <strong>Live Agent Instructions &amp; Book Configuration</strong>
+            <p class="style-governance-sub">This document (<code>src/STYLE_GUIDE.md</code>) is sent as live MCP <code>Instructions</code> on every new AI agent session with zero server restart. Co-authors can edit it with <code>patch_chapter</code> on <code>STYLE_GUIDE</code> and customize editorial settings via <code>BOOK_CONFIG</code> (<code>src/book.json</code>).</p>
+          </div>
+          <a href="/book.json" class="provenance-chip" id="linkRawBookConfig">View /book.json →</a>
+        </div>
+        {{if .Book.BookConfig.ConfigWarning}}
+        <div class="book-config-warning" id="bookConfigWarningBanner">
+          <strong>Configuration Warning:</strong> {{.Book.BookConfig.ConfigWarning}}
+        </div>
+        {{end}}
+        <div class="table-scroll-wrap" id="activeBookConfigCard">
+          <table class="book-config-table">
+            <tbody>
+              <tr>
+                <th>Book Title &amp; Kicker</th>
+                <td>{{.Book.DisplayTitle}} · {{.Book.DisplayKicker}}</td>
+                <th>Config Source</th>
+                <td>{{if .Book.BookConfig.FromRepoFile}}Repository (<code>src/book.json</code>){{else}}Server defaults (CLI / env){{end}}</td>
+              </tr>
+              <tr>
+                <th>Max Heading Length</th>
+                <td>{{if gt .Book.BookConfig.MaxHeadingChars 0}}{{.Book.BookConfig.MaxHeadingChars}} chars{{else}}Disabled{{end}}</td>
+                <th>Em-Dash Check</th>
+                <td>{{if .Book.BookConfig.ForbidEmDash}}Enabled{{else}}Disabled{{end}}</td>
+              </tr>
+              <tr>
+                <th>Banned Words</th>
+                <td>{{if .Book.BookConfig.BannedWords}}{{range $i, $w := .Book.BookConfig.BannedWords}}{{if $i}}, {{end}}<code>{{$w}}</code>{{end}}{{else}}None{{end}}</td>
+                <th>Sidebar Credit</th>
+                <td>{{if .Book.BookConfig.HidePoweredBy}}Hidden{{else}}Visible{{end}}</td>
+              </tr>
+              {{if .Book.BookConfig.TimelineGuidance}}
+              <tr>
+                <th>Timeline Guidance</th>
+                <td colspan="3">{{.Book.BookConfig.TimelineGuidance}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {{end}}
 
       <article class="book-prose" id="chapterProse">
         {{.ActiveChapter.RenderedHTML}}

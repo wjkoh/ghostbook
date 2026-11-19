@@ -201,7 +201,7 @@ func summarizeCommitPatchForPrompt(fullPatch string, activeBySlug map[string]*re
 		}
 		lines := strings.Split(strings.TrimRight(rawChunk, "\n"), "\n")
 		slug := extractSrcSlugFromDiffHeader(lines[0])
-		if slug == "" || strings.EqualFold(slug, "STYLE_GUIDE") {
+		if slug == "" || strings.EqualFold(slug, "STYLE_GUIDE") || strings.EqualFold(slug, "BOOK_CONFIG") {
 			continue
 		}
 		if (strings.HasPrefix(slug, "draft-") || strings.HasPrefix(slug, "archive-")) && strings.Contains(rawChunk, "\n+++ /dev/null") {
@@ -345,6 +345,7 @@ func (e *BookEngine) collectUnsummarizedTimelineBatchLocked(
 		MaxRevision:          commits[len(commits)-1].RevisionNumber,
 		ValidChapters:        validChapters,
 		PriorPublishedTitles: priorTitles,
+		EditorialGuidance:    e.TimelinePromptGuidance(),
 		Commits:              commits,
 	}, batchEndSHA, batchEndRev, revLookup, nil
 }

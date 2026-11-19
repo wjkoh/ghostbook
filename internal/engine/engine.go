@@ -43,24 +43,55 @@ func ValidateSlug(raw string) (string, error) {
 	}
 	switch s {
 	case "timeline", "changelog", "guide", "print", "search", "activity", "api-docs", "docs", "healthz",
-		"summary", "style-guide", "book", "index", "llms", "llms-full", "mcp", "rev", "chapters", "static", "u", "robots", "openapi", "debug", "feed", "rss":
+		"summary", "style-guide", "book", "book-config", "book_config", "settings", "index", "llms", "llms-full", "mcp", "rev", "chapters", "static", "u", "robots", "openapi", "debug", "feed", "rss":
 		return "", fmt.Errorf("%w: %q is a reserved studio route", ErrInvalidSlug, raw)
 	}
 	return s, nil
 }
 
 // NormalizeChapterOrMetaSlug validates a regular chapter slug or the special meta-files
-// SUMMARY and STYLE_GUIDE (case-insensitive).
+// SUMMARY, STYLE_GUIDE, and BOOK_CONFIG (case-insensitive).
 func NormalizeChapterOrMetaSlug(raw string) (string, bool, error) {
-	trimmed := strings.TrimSuffix(strings.TrimSpace(raw), ".md")
+	trimmed := strings.TrimSpace(raw)
+	if strings.EqualFold(trimmed, "book.json") || strings.EqualFold(trimmed, "book_config") || strings.EqualFold(trimmed, "book-config") {
+		return "BOOK_CONFIG", true, nil
+	}
+	trimmed = strings.TrimSuffix(trimmed, ".md")
 	if strings.EqualFold(trimmed, "summary") {
 		return "SUMMARY", true, nil
 	}
 	if strings.EqualFold(trimmed, "style_guide") || strings.EqualFold(trimmed, "style-guide") {
 		return "STYLE_GUIDE", true, nil
 	}
+	if strings.EqualFold(trimmed, "book_config") || strings.EqualFold(trimmed, "book-config") {
+		return "BOOK_CONFIG", true, nil
+	}
 	slug, err := ValidateSlug(raw)
 	return slug, false, err
+}
+
+func srcFilenameForSlug(slug string) string {
+	if slug == "BOOK_CONFIG" {
+		return "book.json"
+	}
+	return slug + ".md"
+}
+
+func srcRelPathForSlug(slug string) string {
+	return "src/" + srcFilenameForSlug(slug)
+}
+
+func (e *BookEngine) liveURLForSlug(slug string) string {
+	switch slug {
+	case "BOOK_CONFIG":
+		return fmt.Sprintf("%s/book.json", e.baseURL)
+	case "STYLE_GUIDE":
+		return fmt.Sprintf("%s/STYLE_GUIDE", e.baseURL)
+	case "SUMMARY":
+		return fmt.Sprintf("%s/SUMMARY.md", e.baseURL)
+	default:
+		return fmt.Sprintf("%s/chapters/%s", e.baseURL, slug)
+	}
 }
 
 func truncateUTF8(s string, maxRunes int) string {
@@ -85,6 +116,7 @@ type BookEngine struct {
 	repoDir          string
 	baseURL          string
 	cfg              EngineConfig
+	effectiveCfg     atomic.Pointer[EffectiveBookConfig]
 	repo             *git.Repository
 	store            *store.Store
 	alerter          atomic.Pointer[store.AlertNotifier]
@@ -157,6 +189,8 @@ func NewBookEngineWithConfig(repoDir string, st *store.Store, baseURL string, cf
 		syncCh:           make(chan struct{}, 1),
 		briefCh:          make(chan struct{}, 1),
 	}
+	baseEff := defaultEffectiveBookConfig(cfg)
+	eng.effectiveCfg.Store(&baseEff)
 
 	eng.mu.Lock()
 	err = eng.rebuildSnapshotAndFTSLocked(context.Background())
@@ -203,12 +237,23 @@ func (e *BookEngine) writeSrcFileSafe(name string, data []byte) error {
 	return root.WriteFile(name, data, 0o644)
 }
 
+func (e *BookEngine) EffectiveConfig() EffectiveBookConfig {
+	if p := e.effectiveCfg.Load(); p != nil {
+		return *p
+	}
+	return defaultEffectiveBookConfig(e.cfg)
+}
+
 func (e *BookEngine) BookTitle() string {
-	return e.cfg.BookTitle
+	return e.EffectiveConfig().BookTitle
 }
 
 func (e *BookEngine) BookKicker() string {
-	return e.cfg.BookKicker
+	return e.EffectiveConfig().BookKicker
+}
+
+func (e *BookEngine) HidePoweredBy() bool {
+	return e.EffectiveConfig().HidePoweredBy
 }
 
 func (e *BookEngine) MCPName() string {
@@ -216,11 +261,21 @@ func (e *BookEngine) MCPName() string {
 }
 
 func (e *BookEngine) ExtraLLMsMarkdown() string {
-	return strings.TrimSpace(e.cfg.ExtraLLMsMarkdown)
+	return strings.TrimSpace(e.EffectiveConfig().ExtraLLMsMarkdown)
 }
 
 func (e *BookEngine) BannedWords() []string {
-	return slices.Clone(e.cfg.BannedWords)
+	return slices.Clone(e.EffectiveConfig().Lint.BannedWords)
+}
+
+func (e *BookEngine) LintConfig() EffectiveLintConfig {
+	eff := e.EffectiveConfig().Lint
+	eff.BannedWords = slices.Clone(eff.BannedWords)
+	return eff
+}
+
+func (e *BookEngine) TimelinePromptGuidance() string {
+	return strings.TrimSpace(e.EffectiveConfig().TimelineGuidance)
 }
 
 func (e *BookEngine) Store() *store.Store {
@@ -366,6 +421,24 @@ func (e *BookEngine) ReadChapter(_ context.Context, in *ReadChapterInput) (*Read
 				RevisionNumber:       snap.HeadRevisionNumber,
 				LiveURL:              liveURL,
 				PermalinkURL:         fmt.Sprintf("%s/rev/%s/STYLE_GUIDE.md", e.baseURL, snap.HeadCommitSHA),
+				LifecycleStatus:      "current",
+				IsLatest:             true,
+				LatestRevisionSHA:    snap.HeadCommitSHA,
+				LatestRevisionNumber: snap.HeadRevisionNumber,
+				LatestLiveURL:        liveURL,
+			}, nil
+		}
+		if slug == "BOOK_CONFIG" && revSpec == "" && errors.Is(err, ErrNotFound) && snap != nil {
+			jsonBody := FormatEffectiveBookConfigJSON(e.EffectiveConfig())
+			liveURL := fmt.Sprintf("%s/book.json", e.baseURL)
+			return &ReadChapterOutput{
+				Slug:                 "BOOK_CONFIG",
+				Title:                "Book Configuration",
+				ContentMarkdown:      jsonBody,
+				RevisionSHA:          snap.HeadCommitSHA,
+				RevisionNumber:       snap.HeadRevisionNumber,
+				LiveURL:              liveURL,
+				PermalinkURL:         fmt.Sprintf("%s/rev/%s/book.json", e.baseURL, snap.HeadCommitSHA),
 				LifecycleStatus:      "current",
 				IsLatest:             true,
 				LatestRevisionSHA:    snap.HeadCommitSHA,

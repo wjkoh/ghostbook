@@ -156,6 +156,14 @@ Every option can be passed as a CLI flag or set through an environment variable.
 
 To accept GitHub push webhooks at /webhooks/github, set GITHUB_WEBHOOK_SECRET in the server environment.
 
+### Book-Level Customization (No Restart Needed)
+
+Editorial rules and book-level settings live inside the Git repository alongside chapters so co-authors can inspect and update them via MCP (`read_chapter` / `patch_chapter`) with full commit history and immediate hot-reload:
+
+- **Style Guide & Live MCP Instructions (`src/STYLE_GUIDE.md`):** Viewable at `/STYLE_GUIDE` (linked in the sidebar) and `/STYLE_GUIDE.md`. Every new MCP connection receives `src/STYLE_GUIDE.md` as its live server `Instructions`.
+- **Optional Book Configuration (`src/book.json`):** Viewable at `/book.json` and editable via slug `BOOK_CONFIG` (strictly validated before committing). Supports `title`, `kicker`, `hide_powered_by`, `lint` (`max_heading_chars`, `forbid_em_dash`, `banned_words`), `timeline.prompt_guidance`, and `extra_llms_markdown`. Omitted fields inherit server CLI/env defaults.
+- **Admin Security Boundary:** Infrastructure settings (`--allowed-hosts`, `--base-url`, API keys, SSH `known_hosts`) and co-author provisioning (`ghostbook authors add|list|revoke|rotate-key`) remain strictly server-side outside the Git repository.
+
 ## Production Deployment
 
 ### Why a Single Small VM (Not Cloud Run or Cloudflare Workers)

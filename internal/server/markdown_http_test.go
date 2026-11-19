@@ -1084,3 +1084,67 @@ func TestPureSSRRoutes_SearchHistoryActivityAndCSP_UT_SSR_04(t *testing.T) {
 		t.Fatalf("expected SSR page views to write 0 rows to agent_audit_log (before=%d after=%d)", len(beforeAudit), len(afterAudit))
 	}
 }
+
+func TestBookConfigHTTPEndpoints_IT_HTTP_01(t *testing.T) {
+	ctx := context.Background()
+	ts, eng, _ := setupTestServer(t)
+
+	// Before src/book.json exists: live /book.json returns synthesized 200 JSON (no-cache),
+	// while pinned /rev/r1/book.json returns 404 (avoiding immutable caching of synthetic bytes).
+	stLive, liveBody, liveHdr := fetchHTTP(t, http.MethodGet, ts.URL+"/book.json", nil)
+	if stLive != http.StatusOK || !strings.HasPrefix(liveHdr.Get("Content-Type"), "application/json") || liveHdr.Get("Cache-Control") != "no-cache" {
+		t.Fatalf("GET /book.json before create: status=%d ct=%q cc=%q", stLive, liveHdr.Get("Content-Type"), liveHdr.Get("Cache-Control"))
+	}
+	if !strings.Contains(liveBody, `"max_heading_chars": 42`) {
+		t.Fatalf("unexpected synthesized /book.json body:\n%s", liveBody)
+	}
+	stHistMissing, _, _ := fetchHTTP(t, http.MethodGet, ts.URL+"/rev/r1/book.json", nil)
+	if stHistMissing != http.StatusNotFound {
+		t.Fatalf("expected 404 for /rev/r1/book.json before src/book.json existed, got %d", stHistMissing)
+	}
+
+	// Alias paths redirect 302 to /book.json instead of Goldmark-rendering raw JSON
+	noRedirectClient := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	for _, alias := range []string{"/BOOK_CONFIG", "/book-config", "/chapters/BOOK_CONFIG"} {
+		resp, err := noRedirectClient.Get(ts.URL + alias)
+		if err != nil {
+			t.Fatalf("GET %s: %v", alias, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/book.json" {
+			t.Fatalf("GET %s: expected 302 -> /book.json, got %d -> %q", alias, resp.StatusCode, resp.Header.Get("Location"))
+		}
+	}
+
+	// Commit src/book.json and verify pinned /rev/{sha}/book.json returns 200 immutable JSON
+	patchOut, err := eng.PatchChapter(ctx, &engine.PatchChapterInput{
+		Slug:          "BOOK_CONFIG",
+		OldText:       `"title": "Ghostbook"`,
+		NewText:       `"title": "HTTP Config Book"`,
+		CommitMessage: "Create src/book.json via engine",
+	})
+	if err != nil {
+		t.Fatalf("PatchChapter(BOOK_CONFIG): %v", err)
+	}
+	stPinned, pinnedBody, pinnedHdr := fetchHTTP(t, http.MethodGet, ts.URL+"/rev/"+patchOut.NewRevisionSHA+"/book.json", nil)
+	if stPinned != http.StatusOK || !strings.Contains(pinnedHdr.Get("Cache-Control"), "immutable") || !strings.Contains(pinnedBody, `"HTTP Config Book"`) {
+		t.Fatalf("GET /rev/%s/book.json: status=%d cc=%q body=%s", patchOut.NewRevisionSHA, stPinned, pinnedHdr.Get("Cache-Control"), pinnedBody)
+	}
+
+	// GET /STYLE_GUIDE renders HTML with governance banner and updated config card
+	stStyle, styleHTML, styleHdr := fetchHTTP(t, http.MethodGet, ts.URL+"/STYLE_GUIDE", nil)
+	if stStyle != http.StatusOK || !strings.HasPrefix(styleHdr.Get("Content-Type"), "text/html") {
+		t.Fatalf("GET /STYLE_GUIDE: status=%d ct=%q", stStyle, styleHdr.Get("Content-Type"))
+	}
+	if !strings.Contains(styleHTML, `id="styleGuideGovernanceBanner"`) || !strings.Contains(styleHTML, `HTTP Config Book`) || !strings.Contains(styleHTML, `src/book.json`) {
+		t.Fatalf("GET /STYLE_GUIDE missing governance banner or active book.json values")
+	}
+
+	// GET /llms.txt lists /book.json
+	stLLMs, llmsBody, _ := fetchHTTP(t, http.MethodGet, ts.URL+"/llms.txt", nil)
+	if stLLMs != http.StatusOK || !strings.Contains(llmsBody, "/book.json") {
+		t.Fatalf("GET /llms.txt missing /book.json link")
+	}
+}

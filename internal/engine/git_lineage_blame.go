@@ -76,7 +76,7 @@ func (e *BookEngine) computeCommitDiffLocked(commitSHA, slug, baseCommitSHA stri
 		if err != nil {
 			return nil, err
 		}
-		targetPath := "src/" + cleanSlug + ".md"
+		targetPath := srcRelPathForSlug(cleanSlug)
 		patchStr = filterUnifiedDiffByPath(patchStr, targetPath)
 	}
 
@@ -397,7 +397,7 @@ func (e *BookEngine) resolveChapterPermalinkLocked(slug, revSpec string) (*ReadC
 	}
 	headCommit := chronological[len(chronological)-1]
 	headRevNum := revMap[headCommit.Hash.String()]
-	relPath := "src/" + cleanSlug + ".md"
+	relPath := srcRelPathForSlug(cleanSlug)
 
 	targetCommit, targetIdx, contentAtTarget, err := e.resolveTargetCommitForPermalinkLocked(chronological, relPath, revSpec)
 	if err != nil {
@@ -420,15 +420,21 @@ func (e *BookEngine) resolveChapterPermalinkLocked(slug, revSpec string) (*ReadC
 		targetRevNum = revMap[chapCommitAtTarget.Hash.String()]
 	}
 	titleAtTarget := extractMarkdownH1(contentAtTarget)
-	if titleAtTarget == "" {
+	if cleanSlug == "BOOK_CONFIG" {
+		titleAtTarget = "Book Configuration"
+	} else if titleAtTarget == "" {
 		titleAtTarget = cleanSlug
 	}
 
 	liveURL := fmt.Sprintf("%s/chapters/%s", e.baseURL, cleanSlug)
 	permalinkURL := fmt.Sprintf("%s/chapters/%s/rev/%s", e.baseURL, cleanSlug, targetSHA)
-	if cleanSlug == "SUMMARY" || cleanSlug == "STYLE_GUIDE" {
+	switch cleanSlug {
+	case "SUMMARY", "STYLE_GUIDE":
 		liveURL = fmt.Sprintf("%s/%s.md", e.baseURL, cleanSlug)
 		permalinkURL = fmt.Sprintf("%s/rev/%s/%s.md", e.baseURL, targetSHA, cleanSlug)
+	case "BOOK_CONFIG":
+		liveURL = fmt.Sprintf("%s/book.json", e.baseURL)
+		permalinkURL = fmt.Sprintf("%s/rev/%s/book.json", e.baseURL, targetSHA)
 	}
 	out := &ReadChapterOutput{
 		Slug:                 cleanSlug,
@@ -493,7 +499,7 @@ func (e *BookEngine) computeChapterBlameLocked(slug string) (*GetChapterBlameOut
 	if err != nil {
 		return nil, err
 	}
-	relPath := "src/" + cleanSlug + ".md"
+	relPath := srcRelPathForSlug(cleanSlug)
 	head, err := e.headCommitLocked()
 	if err != nil {
 		return nil, err

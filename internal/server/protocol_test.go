@@ -1334,3 +1334,84 @@ func TestTimelineRSSFeed_RoutesCachingAndContent(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPBookConfigHotReload_IT_MCP_01(t *testing.T) {
+	ctx := context.Background()
+	ts, eng, st := setupTestServer(t)
+
+	alice, err := st.ResolveAuthorName(ctx, "alice")
+	if err != nil {
+		t.Fatalf("ResolveAuthorName(alice): %v", err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-book-config", Version: "1.0.0"}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint: ts.URL + "/u/" + alice.AuthIdentifier() + "/mcp",
+	}, nil)
+	if err != nil {
+		t.Fatalf("MCP connect: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	// 1. Read synthesized BOOK_CONFIG over MCP
+	readRes, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "read_chapter",
+		Arguments: map[string]any{"slug": "BOOK_CONFIG"},
+	})
+	if err != nil || readRes.IsError {
+		t.Fatalf("MCP read_chapter(BOOK_CONFIG) failed: err=%v res=%+v", err, readRes)
+	}
+
+	// 2. Reject invalid JSON patch over MCP without modifying HEAD
+	headBefore := eng.CurrentSnapshot().HeadCommitSHA
+	badPatch, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "patch_chapter",
+		Arguments: map[string]any{
+			"slug":           "BOOK_CONFIG",
+			"old_text":       "*",
+			"new_text":       `{"not_a_real_key": true}`,
+			"commit_message": "Should fail validation",
+		},
+	})
+	if err == nil && (badPatch == nil || !badPatch.IsError) {
+		t.Fatalf("expected MCP error on unknown key in BOOK_CONFIG")
+	}
+	if eng.CurrentSnapshot().HeadCommitSHA != headBefore {
+		t.Fatalf("expected HEAD unchanged after rejected BOOK_CONFIG patch")
+	}
+
+	// 3. Patch title & hide_powered_by via MCP and verify live hot-reload on / and /openapi.json
+	okPatch, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "patch_chapter",
+		Arguments: map[string]any{
+			"slug": "BOOK_CONFIG",
+			"patches": []map[string]any{
+				{"old_text": `"title": "Ghostbook"`, "new_text": `"title": "MCP Hot-Reload Book"`},
+				{"old_text": `"hide_powered_by": false`, "new_text": `"hide_powered_by": true`},
+			},
+			"commit_message": "Customize title and hide sidebar credit via MCP",
+		},
+	})
+	if err != nil || okPatch.IsError {
+		t.Fatalf("MCP patch_chapter(BOOK_CONFIG) failed: err=%v res=%+v", err, okPatch)
+	}
+
+	homeResp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	homeBytes, _ := io.ReadAll(homeResp.Body)
+	_ = homeResp.Body.Close()
+	if !strings.Contains(string(homeBytes), "MCP Hot-Reload Book") || strings.Contains(string(homeBytes), `<footer class="sidebar-footer">`) {
+		t.Fatalf("expected hot-reloaded title and hidden sidebar footer on /")
+	}
+
+	specResp, err := http.Get(ts.URL + "/openapi.json")
+	if err != nil {
+		t.Fatalf("GET /openapi.json: %v", err)
+	}
+	specBytes, _ := io.ReadAll(specResp.Body)
+	_ = specResp.Body.Close()
+	if !strings.Contains(string(specBytes), "MCP Hot-Reload Book") {
+		t.Fatalf("expected /openapi.json to reflect hot-reloaded title without server restart")
+	}
+}

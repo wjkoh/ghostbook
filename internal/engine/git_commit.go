@@ -464,7 +464,7 @@ func (e *BookEngine) listCommitsLocked(slug string, limit int) ([]CommitEntryIte
 		if err != nil {
 			return nil, err
 		}
-		targetRel = filepath.ToSlash(filepath.Join("src", cleanSlug+".md"))
+		targetRel = srcRelPathForSlug(cleanSlug)
 	}
 
 	chronological, revMap, err := e.orderedCommitsLocked()

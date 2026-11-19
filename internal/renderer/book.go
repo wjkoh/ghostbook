@@ -110,11 +110,23 @@ type AuthorProfileView struct {
 	RoleBadge   string
 }
 
+type BookConfigView struct {
+	MaxHeadingChars  int
+	ForbidEmDash     bool
+	BannedWords      []string
+	TimelineGuidance string
+	HasExtraLLMs     bool
+	HidePoweredBy    bool
+	FromRepoFile     bool
+	ConfigWarning    string
+}
+
 type RenderedBook struct {
 	BookTitle              string
 	BookKicker             string
 	MCPName                string
 	HidePoweredBy          bool
+	BookConfig             BookConfigView
 	Authors                []AuthorProfileView
 	HeadCommitSHA          string
 	HeadRevisionNumber     int32

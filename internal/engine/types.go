@@ -60,7 +60,7 @@ type GetTableOfContentsOutput struct {
 }
 
 type ReadChapterInput struct {
-	Slug     string `json:"slug" jsonschema:"Chapter slug to read, such as 00-preface or 01-system-architecture"`
+	Slug     string `json:"slug" jsonschema:"Chapter or meta slug to read (e.g. 01-system-architecture, SUMMARY, STYLE_GUIDE, or BOOK_CONFIG)"`
 	Revision string `json:"revision,omitempty" jsonschema:"Optional revision SHA (e.g. a1b2c3d) or sequential revision number (e.g. r1, r2) to read a historical permalink snapshot"`
 }
 
@@ -118,7 +118,7 @@ type ChapterPatchHunk struct {
 }
 
 type PatchChapterInput struct {
-	Slug                string             `json:"slug" jsonschema:"Target chapter slug (e.g. 01-system-architecture, SUMMARY, or STYLE_GUIDE)"`
+	Slug                string             `json:"slug" jsonschema:"Target chapter or meta slug (e.g. 01-system-architecture, SUMMARY, STYLE_GUIDE, or BOOK_CONFIG)"`
 	OldText             string             `json:"old_text,omitempty" jsonschema:"Exact contiguous Markdown text in the chapter to replace; must match uniquely (optional if patches array is used)"`
 	NewText             string             `json:"new_text,omitempty" jsonschema:"Replacement Markdown text (optional if patches array is used)"`
 	Patches             []ChapterPatchHunk `json:"patches,omitempty" jsonschema:"Optional array of surgical {old_text, new_text} hunks to apply atomically in a single Git commit"`
@@ -206,7 +206,7 @@ type GetChapterBlameOutput struct {
 }
 
 type RevertChapterRevisionInput struct {
-	Slug            string `json:"slug" jsonschema:"Chapter slug to restore"`
+	Slug            string `json:"slug" jsonschema:"Chapter or meta slug to restore (e.g. 01-system-architecture, SUMMARY, STYLE_GUIDE, or BOOK_CONFIG)"`
 	TargetCommitSHA string `json:"target_commit_sha" jsonschema:"Historical commit SHA or revision number (e.g. r1) whose version of the chapter should be restored"`
 	Reason          string `json:"reason,omitempty" jsonschema:"Editorial reason for reverting to the prior revision"`
 	AuthorName      string `json:"author_name,omitempty" jsonschema:"Optional author override"`
