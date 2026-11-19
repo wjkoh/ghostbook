@@ -150,6 +150,48 @@ Every option can be passed as a CLI flag or set through an environment variable.
 
 ## Production Deployment
 
+### Why a Single Small VM (Not Cloud Run or Cloudflare Workers)
+
+Ghostbook is a single-writer stateful server backed by a local Git repository and a SQLite WAL database on POSIX disk, plus background Git remote sync and editorial timeline goroutines.
+
+- **Do not use Google Cloud Run or serverless containers for a writable book:** Local container disks are ephemeral, edits disappear on scale-to-zero or container recycles, and network filesystems such as GCS FUSE do not provide the POSIX file locking required by SQLite WAL.
+- **Do not try to run Ghostbook inside Cloudflare Workers:** Workers execute JavaScript and WebAssembly isolates rather than a persistent Linux binary with local Git and SQLite storage.
+- **Use one small VM or always-on host with a persistent disk:** Ghostbook typically uses 30 to 60 MB of RAM, so a single GCE Always Free e2-micro VM, a small VPS, or a home server runs Ghostbook and a TLS reverse proxy comfortably for free or a few dollars per month. Pair it with a private GitHub repository via GITHUB_REMOTE_URL for automatic off-box Git backups.
+
+### Recommended Setup: GCE Always Free e2-micro + Caddy + Cloudflare DNS
+
+Remote MCP clients such as the Claude app, ChatGPT app, and Gemini require a valid public HTTPS certificate. Ghostbook intentionally binds plain HTTP on loopback, so you place an HTTPS reverse proxy in front of it.
+
+Caddy is not strictly required; Nginx, Traefik, HAProxy, or Cloudflare Tunnel work too. Caddy is the recommended default because it provisions and renews Let's Encrypt TLS certificates automatically with zero certbot maintenance and handles HTTP-to-HTTPS redirects and compression in a 25-line config file.
+
+1. **Create a GCE e2-micro VM** in an Always Free region (us-west1, us-central1, or us-east1) with a 30 GB standard persistent disk, allowing inbound TCP ports 80 and 443 only. Never expose ports 8090 or 6060 on the firewall.
+2. **Point your domain in Cloudflare DNS (or any DNS provider):** Create an A record for your hostname (for example, book.example.com) pointing to the VM's IP address. If you use Cloudflare, set the record to **DNS only (grey cloud)** so Caddy completes Let's Encrypt challenges directly and Cloudflare bot challenges never interfere with AI agent MCP requests or link fetchers.
+3. **Install the release binary and systemd unit on the VM:**
+
+```bash
+curl -fsSLO https://github.com/wjkoh/ghostbook/releases/download/v0.1.0/ghostbook-linux-amd64
+curl -fsSLO https://github.com/wjkoh/ghostbook/releases/download/v0.1.0/SHA256SUMS
+grep ghostbook-linux-amd64 SHA256SUMS | sha256sum -c -
+sudo install -m 0755 ghostbook-linux-amd64 /usr/local/bin/ghostbook
+```
+
+4. **Configure co-authors and start Ghostbook on loopback:** Copy deploy/authors.example.json to /etc/ghostbook/authors.json and deploy/ghostbook.service.example to /etc/systemd/system/ghostbook.service, update the domain and title, and enable the service.
+5. **Install Caddy and copy deploy/Caddyfile.example to /etc/caddy/Caddyfile**, replacing book.example.com with your domain, then reload Caddy.
+
+### Caddy Best Practices for Ghostbook
+
+- **Bind Ghostbook strictly to loopback:** Run Ghostbook with --addr=127.0.0.1:8090 so all public traffic passes through Caddy over HTTPS.
+- **Disable proxy buffering on MCP routes:** Keep flush_interval -1 on /mcp* and /u/*/mcp* (as shown in deploy/Caddyfile.example) so Streamable HTTP MCP responses flush immediately.
+- **Block /debug/* at the edge:** Return 404 for /debug/* in Caddy and bind optional --pprof-addr strictly to 127.0.0.1:6060.
+- **Disable Caddy's admin endpoint on single-purpose VMs:** Include admin off in the global Caddyfile block unless you need live API reloads.
+- **Enforce Host allowlisting and security headers:** Set Strict-Transport-Security and X-Content-Type-Options: nosniff in Caddy, and pass --allowed-hosts=book.example.com to Ghostbook.
+
+### Zero-Open-Port Option: Cloudflare Tunnel (cloudflared)
+
+If you prefer to host Ghostbook on a home server, office Mac mini, or private VM with zero inbound firewall ports open, bind Ghostbook to 127.0.0.1:8090 and route a Cloudflare Tunnel directly to http://127.0.0.1:8090. Disable Cloudflare Bot Fight Mode and AI scraper blocking for that hostname so Claude, ChatGPT, and Gemini MCP connectors and link fetchers are not challenged.
+
+### Deployment Templates and Docker
+
 Sample configurations live in the deploy/ directory:
 
 - deploy/authors.example.json shows the declarative co-author schema.
@@ -157,11 +199,11 @@ Sample configurations live in the deploy/ directory:
 - deploy/ghostbook.service.example runs Ghostbook as an unprivileged systemd service bound to 127.0.0.1:8090.
 - deploy/ghostbook-apply-staged.sh, deploy/ghostbook-upgrade.service.example, and deploy/ghostbook-upgrade.timer.example implement zero-interruption upgrades that promote staged binaries during an idle window and automatically roll back if /healthz fails.
 
-A multi-stage Dockerfile is included for container deployments:
+A multi-stage Dockerfile is included for single-instance container deployments with a persistent volume:
 
 ```bash
 docker build -t ghostbook .
-docker run -p 8090:8090 -v "$(pwd)/data:/data" ghostbook
+docker run -p 127.0.0.1:8090:8090 -v "$(pwd)/data:/data" ghostbook
 ```
 
 ## License and Governance
