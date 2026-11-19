@@ -105,6 +105,13 @@ function setExpandedH2Section(sectionIdx, forceToggle) {
   if (chev) chev.textContent = nextFolded ? '▸' : '▾';
 }
 
+function getHeadingPlainText(hEl) {
+  if (!hEl) return '';
+  const clone = hEl.cloneNode(true);
+  clone.querySelectorAll('.heading-anchor').forEach(el => el.remove());
+  return (clone.textContent || '').trim();
+}
+
 function initActiveChapterSectionOutline() {
   const activeItem = document.querySelector('#bookSidebar .toc-item.active');
   const prose = document.getElementById('chapterProse');
@@ -130,7 +137,7 @@ function initActiveChapterSectionOutline() {
       hEl.id = 'sec-' + rawIdx;
     }
     const tag = hEl.tagName.toLowerCase();
-    const cleanText = stripLeadingOutlinePrefix(hEl.textContent);
+    const cleanText = stripLeadingOutlinePrefix(getHeadingPlainText(hEl));
 
     if (tag === 'h2') {
       h2Index++;
@@ -206,22 +213,11 @@ function initTocFolding() {
   initActiveChapterSectionOutline();
 }
 
-function copyChapterPermalink() {
-  const anchor = document.getElementById('chapterPermalinkAnchor');
-  const btn = document.getElementById('btnCopyPermalink');
-  if (!anchor) return;
-  const fullURL = window.location.origin + anchor.getAttribute('href');
-  const markCopied = () => {
-    if (btn) {
-      const prev = btn.textContent;
-      btn.textContent = '✓ Permalink Copied';
-      setTimeout(() => { btn.textContent = prev; }, 1600);
-    }
-  };
+function copyTextToClipboard(text, onSuccess) {
   const fallbackCopy = () => {
     try {
       const ta = document.createElement('textarea');
-      ta.value = fullURL;
+      ta.value = text;
       ta.setAttribute('readonly', '');
       ta.style.position = 'fixed';
       ta.style.opacity = '0';
@@ -229,14 +225,73 @@ function copyChapterPermalink() {
       ta.select();
       const ok = document.execCommand('copy');
       document.body.removeChild(ta);
-      if (ok) markCopied();
+      if (ok && typeof onSuccess === 'function') onSuccess();
     } catch (_) {}
   };
   if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-    navigator.clipboard.writeText(fullURL).then(markCopied).catch(fallbackCopy);
+    navigator.clipboard.writeText(text).then(() => {
+      if (typeof onSuccess === 'function') onSuccess();
+    }).catch(fallbackCopy);
     return;
   }
   fallbackCopy();
+}
+
+function copyChapterPermalink() {
+  const anchor = document.getElementById('chapterPermalinkAnchor');
+  const btn = document.getElementById('btnCopyPermalink');
+  if (!anchor) return;
+  const fullURL = window.location.origin + anchor.getAttribute('href');
+  copyTextToClipboard(fullURL, () => {
+    if (btn) {
+      const prev = btn.textContent;
+      btn.textContent = '✓ Permalink Copied';
+      setTimeout(() => { btn.textContent = prev; }, 1600);
+    }
+  });
+}
+
+function initHeadingAnchors() {
+  const prose = document.getElementById('chapterProse');
+  if (!prose) return;
+
+  const headings = Array.from(prose.querySelectorAll('h2, h3'));
+  headings.forEach((hEl, rawIdx) => {
+    if (!hEl.id) {
+      hEl.id = 'sec-' + rawIdx;
+    }
+    if (hEl.querySelector('.heading-anchor')) return;
+
+    const anchor = document.createElement('a');
+    anchor.className = 'heading-anchor';
+    anchor.href = '#' + hEl.id;
+    anchor.textContent = '#';
+    anchor.setAttribute('aria-label', 'Copy link to section');
+    anchor.title = 'Copy section link';
+
+    let resetTimer = null;
+    anchor.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const targetHash = '#' + hEl.id;
+      const fullURL = window.location.origin + window.location.pathname + targetHash;
+      if (window.history && typeof window.history.replaceState === 'function') {
+        window.history.replaceState(null, '', targetHash);
+      } else {
+        window.location.hash = hEl.id;
+      }
+      copyTextToClipboard(fullURL, () => {
+        anchor.textContent = '✓';
+        anchor.classList.add('copied');
+        if (resetTimer) clearTimeout(resetTimer);
+        resetTimer = setTimeout(() => {
+          anchor.textContent = '#';
+          anchor.classList.remove('copied');
+        }, 1400);
+      });
+    });
+
+    hEl.appendChild(anchor);
+  });
 }
 
 function focusSidebarOrPageSearch() {
@@ -359,6 +414,7 @@ function formatTimelineTimestamps() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   initTocFolding();
+  initHeadingAnchors();
   formatTimelineTimestamps();
   attachMermaidExpandAffordances();
   const savedTheme = safeGetStudioStorage('ghostbook_theme') || 'system';

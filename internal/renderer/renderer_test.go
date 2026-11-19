@@ -243,11 +243,11 @@ func TestRenderPages_ChapterChangelogPrintAndGuide(t *testing.T) {
 }
 
 func TestEmbeddedAssets_NonEmptyAndValidSyntax(t *testing.T) {
-	if !strings.Contains(renderer.StudioCSS(), ".permalink-banner") || !strings.Contains(renderer.StudioCSS(), ".book-prose") {
-		t.Fatalf("expected StudioCSS to contain core styles")
+	if !strings.Contains(renderer.StudioCSS(), ".permalink-banner") || !strings.Contains(renderer.StudioCSS(), ".book-prose") || !strings.Contains(renderer.StudioCSS(), ".heading-anchor") || !strings.Contains(renderer.StudioCSS(), "scroll-margin-top") {
+		t.Fatalf("expected StudioCSS to contain core styles and heading anchor styles")
 	}
-	if !strings.Contains(renderer.StudioJS(), "function focusSidebarOrPageSearch") || !strings.Contains(renderer.StudioJS(), "function setReaderTheme") {
-		t.Fatalf("expected StudioJS to contain core progressive-enhancement functions")
+	if !strings.Contains(renderer.StudioJS(), "function focusSidebarOrPageSearch") || !strings.Contains(renderer.StudioJS(), "function setReaderTheme") || !strings.Contains(renderer.StudioJS(), "function initHeadingAnchors") {
+		t.Fatalf("expected StudioJS to contain core progressive-enhancement functions and heading anchor initializer")
 	}
 	if !strings.Contains(renderer.GuideJS(), "function selectGuideProfile") {
 		t.Fatalf("expected GuideJS to contain profile switcher")
