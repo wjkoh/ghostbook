@@ -251,6 +251,7 @@ func (e *BookEngine) rebuildSnapshotAndFTSLocked(ctx context.Context) error {
 		BookTitle:              e.BookTitle(),
 		BookKicker:             e.BookKicker(),
 		MCPName:                e.MCPName(),
+		HidePoweredBy:          e.cfg.HidePoweredBy,
 		Authors:                authorViews,
 		HeadCommitSHA:          headSHA,
 		HeadRevisionNumber:     histIdx.headRevNum,

@@ -83,6 +83,11 @@
         <span>US-Letter Full Book Print View</span>
       </a>
     </nav>
+    {{if not .Book.HidePoweredBy}}
+    <footer class="sidebar-footer">
+      Powered by <a href="https://github.com/wjkoh/ghostbook" target="_blank" rel="noopener noreferrer">Ghostbook</a>
+    </footer>
+    {{end}}
   </aside>
 {{end}}
 

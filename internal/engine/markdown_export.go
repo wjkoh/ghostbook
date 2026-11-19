@@ -350,6 +350,7 @@ func (e *BookEngine) RenderBookAtRevision(revSpec string) (*renderer.RenderedBoo
 		BookTitle:          e.BookTitle(),
 		BookKicker:         e.BookKicker(),
 		MCPName:            e.MCPName(),
+		HidePoweredBy:      e.cfg.HidePoweredBy,
 		Authors:            authorViews,
 		HeadCommitSHA:      exp.RevisionSHA,
 		HeadRevisionNumber: exp.RevisionNumber,

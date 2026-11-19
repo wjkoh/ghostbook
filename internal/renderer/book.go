@@ -114,6 +114,7 @@ type RenderedBook struct {
 	BookTitle              string
 	BookKicker             string
 	MCPName                string
+	HidePoweredBy          bool
 	Authors                []AuthorProfileView
 	HeadCommitSHA          string
 	HeadRevisionNumber     int32

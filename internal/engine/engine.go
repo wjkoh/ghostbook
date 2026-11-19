@@ -76,6 +76,7 @@ type EngineConfig struct {
 	BookTitle         string
 	BookKicker        string
 	MCPName           string
+	HidePoweredBy     bool
 	ExtraLLMsMarkdown string
 	BannedWords       []string
 }

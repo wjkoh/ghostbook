@@ -99,6 +99,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		bookTitle        = fs.String("book-title", "", "Book display title (defaults to GHOSTBOOK_TITLE or \"Ghostbook\")")
 		bookKicker       = fs.String("book-kicker", "", "Sidebar kicker subtitle (defaults to GHOSTBOOK_KICKER or \"Living Book\")")
 		mcpName          = fs.String("mcp-name", "", "MCP server identifier (defaults to GHOSTBOOK_MCP_NAME or \"ghostbook\")")
+		hidePoweredBy    = fs.Bool("hide-powered-by", parseEnvBool("GHOSTBOOK_HIDE_POWERED_BY"), "Hide the 'Powered by Ghostbook' link in the reader sidebar footer")
 		authorsFile      = fs.String("authors-file", "", "Optional path to JSON file defining co-authors (defaults to GHOSTBOOK_AUTHORS_FILE)")
 		allowedHosts     = fs.String("allowed-hosts", "", "Comma-separated list of allowed HTTP Host headers (defaults to GHOSTBOOK_ALLOWED_HOSTS)")
 		urlPrefixStrip   = fs.String("url-prefix-strip", "", "Optional reverse-proxy URL path prefix to strip before routing (defaults to GHOSTBOOK_URL_PREFIX_STRIP)")
@@ -223,6 +224,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		BookTitle:         effectiveTitle,
 		BookKicker:        effectiveKicker,
 		MCPName:           effectiveMCPName,
+		HidePoweredBy:     *hidePoweredBy,
 		ExtraLLMsMarkdown: extraLLMsMD,
 		BannedWords:       effectiveBannedWords,
 	}, effectiveRemoteURL)

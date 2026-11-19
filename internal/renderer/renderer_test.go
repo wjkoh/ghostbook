@@ -1012,3 +1012,51 @@ func TestRenderTimelineRSS(t *testing.T) {
 		t.Fatalf("xml.Unmarshal empty RSS failed: %v", err)
 	}
 }
+
+func TestSidebarPoweredByCredit(t *testing.T) {
+	ch := &renderer.ChapterView{
+		Slug:         "00-intro",
+		Title:        "Introduction",
+		RenderedHTML: "<p>Hello</p>",
+	}
+	book := &renderer.RenderedBook{
+		BookTitle:     "Field Guide",
+		HeadCommitSHA: "abc1234",
+		Chapters:      []*renderer.ChapterView{ch},
+		BySlug:        map[string]*renderer.ChapterView{"00-intro": ch},
+	}
+
+	homeHTML, err := renderer.RenderHomePage(renderer.HomePageData{Book: book, BaseURL: "https://docs.example.com"})
+	if err != nil {
+		t.Fatalf("RenderHomePage: %v", err)
+	}
+	wantLink := `<a href="https://github.com/wjkoh/ghostbook" target="_blank" rel="noopener noreferrer">Ghostbook</a>`
+	if !strings.Contains(string(homeHTML), wantLink) {
+		t.Fatalf("expected sidebar Powered by Ghostbook link in home page")
+	}
+
+	chHTML, err := renderer.RenderChapterPage(renderer.ChapterPageData{Book: book, ActiveChapter: ch, BaseURL: "https://docs.example.com"})
+	if err != nil {
+		t.Fatalf("RenderChapterPage: %v", err)
+	}
+	if !strings.Contains(string(chHTML), wantLink) {
+		t.Fatalf("expected sidebar Powered by Ghostbook link in chapter page")
+	}
+
+	printHTML, err := renderer.RenderPrintPage(renderer.PrintPageData{Book: book, BaseURL: "https://docs.example.com"})
+	if err != nil {
+		t.Fatalf("RenderPrintPage: %v", err)
+	}
+	if strings.Contains(string(printHTML), "https://github.com/wjkoh/ghostbook") {
+		t.Fatalf("did not expect Ghostbook credit link in /print output")
+	}
+
+	book.HidePoweredBy = true
+	hiddenHTML, err := renderer.RenderHomePage(renderer.HomePageData{Book: book, BaseURL: "https://docs.example.com"})
+	if err != nil {
+		t.Fatalf("RenderHomePage(HidePoweredBy=true): %v", err)
+	}
+	if strings.Contains(string(hiddenHTML), `<footer class="sidebar-footer">`) || strings.Contains(string(hiddenHTML), "https://github.com/wjkoh/ghostbook") {
+		t.Fatalf("expected Powered by Ghostbook footer to be suppressed when HidePoweredBy is true")
+	}
+}
