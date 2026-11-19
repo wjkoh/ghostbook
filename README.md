@@ -46,7 +46,7 @@ The screenshots below were captured from a live 10-commit Ghostbook session auth
 
 ## Quickstart
 
-Build or install Ghostbook with Go 1.26 or newer, or download a precompiled binary from GitHub Releases.
+Build or install Ghostbook with Go 1.26.2 or newer, or download a precompiled binary from [GitHub Releases](https://github.com/wjkoh/ghostbook/releases).
 
 ```bash
 go install github.com/wjkoh/ghostbook/cmd/ghostbook@latest
@@ -84,12 +84,12 @@ Open http://127.0.0.1:8090 in a browser to read the starter book, or open the pr
 | Authoring Protocols | Streamable HTTP MCP + ConnectRPC + OpenAPI 3.1 | Exposes the same 13 tools across MCP, ConnectRPC JSON/Protobuf, and ChatGPT Custom GPT Actions. |
 | Human Reader | Server-rendered HTML + vendored KaTeX & Mermaid | Instant page loads with zero external CDNs, strict Content Security Policy, and US-Letter print stylesheets. |
 | AI HTTP Discovery | /llms.txt, /llms-full.txt, /book.md, and .md twins | Any browser or AI link fetcher can retrieve exact raw Markdown via .md suffixes or Accept: text/markdown. |
-| Revision Lineage | Immutable /rev/rN permalinks and /feed.xml RSS 2.0 | Historical chapters and Mermaid SVGs remain permanently citable even after chapters are renamed or retired. |
+| Revision Lineage | Immutable /rev/rN permalinks and /feed.xml RSS 2.0 | Historical chapters and Mermaid diagrams remain permanently citable even after chapters are renamed or retired. |
 | Operational Safety | Loopback-only pprof + idle-window staged upgrades | Diagnostics stay off public interfaces, and production upgrades wait for a quiet window before restarting. |
 
 ## Authoring Tools
 
-All 13 tools are served over both MCP at /u/<email>:<secret>/mcp and ConnectRPC at /u/<email>:<secret>/book.v1.BookService/<Method>.
+All 13 tools are served over both MCP at /u/{email}:{secret}/mcp and ConnectRPC at /u/{email}:{secret}/book.v1.BookService/{Method}.
 
 | Tool | Role |
 | --- | --- |
@@ -112,13 +112,13 @@ All 13 tools are served over both MCP at /u/<email>:<secret>/mcp and ConnectRPC 
 | Route | Format | Description |
 | --- | --- | --- |
 | / and /timeline | HTML / Markdown | Editorial timeline front page with recent milestones and open callouts. |
-| /chapters/<slug> | HTML / Markdown | Live chapter view; append .md or send Accept: text/markdown for raw bytes. |
-| /chapters/<slug>/rev/<rN> | HTML / Markdown | Immutable historical permalink pinned to a revision number or Git SHA. |
-| /chapters/<slug>/rev/<sha>/diagrams/<n> | image/svg+xml | Immutable native Mermaid SVG diagram endpoint for slides and citations. |
-| /llms.txt and /llms-full.txt | text/markdown | Machine-readable index and full-book Markdown compilation at HEAD or /rev/<rN>. |
+| /chapters/{slug} | HTML / Markdown | Live chapter view; append .md or send Accept: text/markdown for raw bytes. |
+| /chapters/{slug}/rev/{rN} | HTML / Markdown | Immutable historical permalink pinned to a revision number or Git SHA. |
+| /chapters/{slug}/rev/{sha}/diagrams/{n} | HTML / Mermaid | Standalone revision-pinned Mermaid diagram viewer; append .mmd for raw Mermaid source. |
+| /llms.txt, /llms-full.txt, and /book.md | text/markdown | Machine-readable index and full-book Markdown compilation at HEAD or /rev/{rN}. |
 | /feed.xml, /rss.xml, /timeline.xml | application/rss+xml | RSS 2.0 feed of synthesized editorial milestones with ETag and conditional GET support. |
 | /search, /changelog, /activity, /print | HTML | Server-rendered full-text search, Git log, agent audit log, and US-Letter print view. |
-| /guide, /api-docs, /openapi.json | HTML / JSON | Co-author setup guide, Swagger UI, and OpenAPI 3.1 specification. |
+| /guide, /api-docs, /openapi.json | HTML / JSON | Co-author setup guide, Scalar API Reference, and OpenAPI 3.1 specification. |
 | /healthz | application/json | Live health probe reporting HEAD SHA, revision number, and chapter counts. |
 
 ## Configuration
@@ -139,14 +139,21 @@ Every option can be passed as a CLI flag or set through an environment variable.
 | --url-prefix-strip | GHOSTBOOK_URL_PREFIX_STRIP | empty | Optional subpath prefix stripped before routing. |
 | --extra-llms-file | GHOSTBOOK_EXTRA_LLMS_FILE | empty | Optional Markdown file appended to /llms.txt. |
 | --banned-words | GHOSTBOOK_BANNED_WORDS | empty | Comma-separated custom terms flagged by the authoring linter. |
-| --remote-url | GITHUB_REMOTE_URL | empty | Optional Git remote URL for periodic background sync. |
+| --remote-url | GITHUB_REMOTE_URL | empty | Optional Git remote URL for periodic background sync; authenticate with GITHUB_SSH_KEY_PATH or GITHUB_PAT. |
 | --sync-interval | GHOSTBOOK_SYNC_INTERVAL | 60s | Interval between background Git remote syncs. |
+| --send-invites | GHOSTBOOK_SEND_INVITES | false | Send pending co-author invite emails on startup via Resend. |
 | --resend-api-key | RESEND_API_KEY | empty | Optional Resend API key for invites and operational alerts. |
 | --mail-from | GHOSTBOOK_MAIL_FROM | empty | Sender address for outgoing Resend emails. |
 | --mail-reply-to | GHOSTBOOK_MAIL_REPLY_TO | empty | Reply-To address for outgoing Resend emails. |
 | --alert-recipients | GHOSTBOOK_ALERT_RECIPIENTS | empty | Comma-separated maintainer email addresses for operational alerts. |
 | --gemini-api-key | GEMINI_API_KEY | empty | Optional Gemini API key for synthesizing front-page timeline milestones. |
+| --gemini-model | GEMINI_MODEL | gemini-2.5-flash | Optional Gemini model override for timeline synthesis. |
 | --vertex-project | VERTEX_PROJECT | empty | Optional GCP project ID for Vertex AI timeline synthesis. |
+| --vertex-location | VERTEX_LOCATION | global | Optional GCP region for Vertex AI timeline synthesis. |
+| --vertex-credentials-file | VERTEX_CREDENTIALS_FILE | empty | Path to a GCP service account JSON key for Vertex AI. |
+| --briefing-debounce | GHOSTBOOK_BRIEFING_DEBOUNCE | 10m | Quiet period before synthesizing new timeline milestones. |
+
+To accept GitHub push webhooks at /webhooks/github, set GITHUB_WEBHOOK_SECRET in the server environment.
 
 ## Production Deployment
 
@@ -164,9 +171,9 @@ Remote MCP clients such as the Claude app, ChatGPT app, and Gemini require a val
 
 Caddy is not strictly required; Nginx, Traefik, HAProxy, or Cloudflare Tunnel work too. Caddy is the recommended default because it provisions and renews Let's Encrypt TLS certificates automatically with zero certbot maintenance and handles HTTP-to-HTTPS redirects and compression in a 25-line config file.
 
-1. **Create a GCE e2-micro VM** in an Always Free region (us-west1, us-central1, or us-east1) with a 30 GB standard persistent disk, allowing inbound TCP ports 80 and 443 only. Never expose ports 8090 or 6060 on the firewall.
-2. **Point your domain in Cloudflare DNS (or any DNS provider):** Create an A record for your hostname (for example, book.example.com) pointing to the VM's IP address. If you use Cloudflare, set the record to **DNS only (grey cloud)** so Caddy completes Let's Encrypt challenges directly and Cloudflare bot challenges never interfere with AI agent MCP requests or link fetchers.
-3. **Install the release binary and systemd unit on the VM:**
+1. **Create a GCE e2-micro VM:** Provision one instance in an Always Free region such as us-west1, us-central1, or us-east1 with a 30 GB standard persistent disk, allowing inbound TCP ports 80 and 443 only. Never expose ports 8090 or 6060 on the firewall.
+2. **Point your domain in Cloudflare DNS or another DNS provider:** Create an A record for your hostname, such as book.example.com, pointing to the VM's IP address. If you use Cloudflare, keep the record set to DNS only with the grey cloud icon so Caddy completes Let's Encrypt challenges directly and Cloudflare bot challenges never interfere with AI agent MCP requests or link fetchers.
+3. **Install the release binary on the VM:**
 
 ```bash
 curl -fsSLO https://github.com/wjkoh/ghostbook/releases/download/v0.1.0/ghostbook-linux-amd64
@@ -175,31 +182,31 @@ grep ghostbook-linux-amd64 SHA256SUMS | sha256sum -c -
 sudo install -m 0755 ghostbook-linux-amd64 /usr/local/bin/ghostbook
 ```
 
-4. **Configure co-authors and start Ghostbook on loopback:** Copy deploy/authors.example.json to /etc/ghostbook/authors.json and deploy/ghostbook.service.example to /etc/systemd/system/ghostbook.service, update the domain and title, and enable the service.
-5. **Install Caddy and copy deploy/Caddyfile.example to /etc/caddy/Caddyfile**, replacing book.example.com with your domain, then reload Caddy.
+4. **Configure co-authors and start Ghostbook on loopback:** Copy [deploy/authors.example.json](deploy/authors.example.json) to /etc/ghostbook/authors.json and [deploy/ghostbook.service.example](deploy/ghostbook.service.example) to /etc/systemd/system/ghostbook.service, update the domain and title, and enable the service.
+5. **Install Caddy and configure HTTPS:** Copy [deploy/Caddyfile.example](deploy/Caddyfile.example) to /etc/caddy/Caddyfile, replace book.example.com with your domain, and reload Caddy.
 
 ### Caddy Best Practices for Ghostbook
 
 - **Bind Ghostbook strictly to loopback:** Run Ghostbook with --addr=127.0.0.1:8090 so all public traffic passes through Caddy over HTTPS.
-- **Disable proxy buffering on MCP routes:** Keep flush_interval -1 on /mcp* and /u/*/mcp* (as shown in deploy/Caddyfile.example) so Streamable HTTP MCP responses flush immediately.
-- **Block /debug/* at the edge:** Return 404 for /debug/* in Caddy and bind optional --pprof-addr strictly to 127.0.0.1:6060.
+- **Disable proxy buffering on MCP routes:** Keep flush_interval -1 on the MCP route matcher in [deploy/Caddyfile.example](deploy/Caddyfile.example) so Streamable HTTP MCP responses flush immediately.
+- **Block debug endpoints at the edge:** Return 404 for /debug paths in Caddy and bind optional --pprof-addr strictly to 127.0.0.1:6060.
 - **Disable Caddy's admin endpoint on single-purpose VMs:** Include admin off in the global Caddyfile block unless you need live API reloads.
 - **Enforce Host allowlisting and security headers:** Set Strict-Transport-Security and X-Content-Type-Options: nosniff in Caddy, and pass --allowed-hosts=book.example.com to Ghostbook.
 
-### Zero-Open-Port Option: Cloudflare Tunnel (cloudflared)
+### Zero-Open-Port Option: Cloudflare Tunnel
 
-If you prefer to host Ghostbook on a home server, office Mac mini, or private VM with zero inbound firewall ports open, bind Ghostbook to 127.0.0.1:8090 and route a Cloudflare Tunnel directly to http://127.0.0.1:8090. Disable Cloudflare Bot Fight Mode and AI scraper blocking for that hostname so Claude, ChatGPT, and Gemini MCP connectors and link fetchers are not challenged.
+If you prefer to host Ghostbook on a home server, office Mac mini, or private VM with zero inbound firewall ports open, bind Ghostbook to 127.0.0.1:8090 and route a Cloudflare Tunnel via cloudflared directly to http://127.0.0.1:8090. Disable Cloudflare Bot Fight Mode and AI scraper blocking for that hostname so Claude, ChatGPT, and Gemini MCP connectors and link fetchers are not challenged.
 
 ### Deployment Templates and Docker
 
-Sample configurations live in the deploy/ directory:
+Sample configurations live in the deploy directory:
 
-- deploy/authors.example.json shows the declarative co-author schema.
-- deploy/Caddyfile.example configures automatic HTTPS, HSTS, SSE flush settings for MCP, and blocks /debug/*.
-- deploy/ghostbook.service.example runs Ghostbook as an unprivileged systemd service bound to 127.0.0.1:8090.
-- deploy/ghostbook-apply-staged.sh, deploy/ghostbook-upgrade.service.example, and deploy/ghostbook-upgrade.timer.example implement zero-interruption upgrades that promote staged binaries during an idle window and automatically roll back if /healthz fails.
+- [deploy/authors.example.json](deploy/authors.example.json) shows the declarative co-author schema.
+- [deploy/Caddyfile.example](deploy/Caddyfile.example) configures automatic HTTPS, HSTS, SSE flush settings for MCP, and blocks /debug paths.
+- [deploy/ghostbook.service.example](deploy/ghostbook.service.example) runs Ghostbook as an unprivileged systemd service bound to 127.0.0.1:8090.
+- [deploy/ghostbook-apply-staged.sh](deploy/ghostbook-apply-staged.sh), [deploy/ghostbook-upgrade.service.example](deploy/ghostbook-upgrade.service.example), and [deploy/ghostbook-upgrade.timer.example](deploy/ghostbook-upgrade.timer.example) implement zero-interruption upgrades that promote staged binaries during an idle window and automatically roll back if /healthz fails.
 
-A multi-stage Dockerfile is included for single-instance container deployments with a persistent volume:
+A multi-stage [Dockerfile](Dockerfile) is included for single-instance container deployments with a persistent volume:
 
 ```bash
 docker build -t ghostbook .
@@ -208,6 +215,6 @@ docker run -p 127.0.0.1:8090:8090 -v "$(pwd)/data:/data" ghostbook
 
 ## License and Governance
 
-Ghostbook is licensed under the Apache License, Version 2.0. See LICENSE for full terms.
+Ghostbook is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for full terms.
 
 This repository is published as a read-only open-source release. GitHub Issues, Discussions, and external pull requests are disabled. You are welcome to use, deploy, and fork Ghostbook freely under the Apache 2.0 license.
