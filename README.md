@@ -4,6 +4,26 @@ Single-binary collaborative book studio where humans read cleanly on the web and
 
 Ghostbook turns a Git-backed Markdown book into a live server-rendered publication with an embedded pure-Go SQLite FTS5 search index, immutable revision permalinks, raw Markdown HTTP twins, an RSS 2.0 timeline feed, and 13 authenticated MCP and ConnectRPC authoring tools. There is no web editor, no Node.js runtime, and no external CDN dependency.
 
+## Preview
+
+The screenshots below were captured from a live 10-commit Ghostbook session authored entirely through Streamable HTTP MCP calls across three co-authors.
+
+### Editorial Timeline & Open Callouts (Light Mode)
+
+![Ghostbook editorial timeline with synthesized milestones, revision badges, and open editorial callouts](docs/screenshots/01-timeline.png)
+
+### Chapter Reader with Mermaid Diagrams & KaTeX Math (Light Mode)
+
+![Ghostbook chapter view rendering a Mermaid architecture diagram, KaTeX display math, and a comparative table](docs/screenshots/02-chapter.png)
+
+### Section-Level Git Blame & Unified Diffs (Dark Mode)
+
+![Ghostbook chapter history showing multi-author Git blame attribution and commit unified diffs](docs/screenshots/03-history-blame.png)
+
+### Co-Author Remote MCP Setup Guide (Dark Mode)
+
+![Ghostbook co-author setup guide with personalized remote MCP endpoint and Claude Code CLI snippet](docs/screenshots/04-mcp-guide.png)
+
 ## Why Ghostbook
 
 When a small team co-authors a strategy book, technical specification, or institutional handbook with AI agents, copy-pasting between chat windows and shared docs breaks lineage immediately. Ghostbook enforces a clean division of labor:
@@ -26,9 +46,9 @@ Register your first co-author. Ghostbook creates a local SQLite database and pri
 ghostbook authors add \
   --data-dir ./data \
   --base-url http://127.0.0.1:8090 \
-  --id alice \
-  --name "Alice Chen" \
-  --email alice@example.com \
+  --id wjkoh \
+  --name "Woojong Koh" \
+  --email wjkoh@example.com \
   --badge "Lead Author"
 ```
 
