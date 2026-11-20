@@ -26,6 +26,26 @@ Under the hood, Ghostbook ships as a single static Go binary with embedded Git, 
 - **Investment memos and research bibles:** Analysts and partners continuously update diligence findings, competitor profiles, and meeting briefings through their AI assistants. On committee day, they export a print-ready US-Letter packet or generate a tailored LP one-pager directly from the latest revision.
 - **Cross-functional deal and onboarding playbooks:** Sales, legal, and operations teams keep one canonical playbook updated after every customer call, letting any teammate's AI agent answer questions via SQLite FTS5 search or draft customer-specific proposals without hunting through folders.
 
+## How Ghostbook Compares to Open-Source Alternatives
+
+Ghostbook is intentionally narrow: a single self-hosted Go binary with no browser editor, where every write comes from an AI agent over MCP or ConnectRPC into Git. Compare it with other self-hosted, OSI open-source knowledge bases to pick the right tool for your team:
+
+| Project | License & Runtime Stack | Similarities to Ghostbook | Key Differences | Best Choice When |
+| :--- | :--- | :--- | :--- | :--- |
+| **Ghostbook** | Apache 2.0 · Single static Go binary, embedded Git, SQLite FTS5 | Reference baseline: agent-only remote MCP and ConnectRPC writes, Git blame, live STYLE_GUIDE.md MCP instructions, /llms.txt and .md twins | No browser editor, no relational tables or Kanban views, single-writer VM deployment | A team collaborates through Claude, ChatGPT, Gemini, or coding agents and wants one clean, Git-audited book in 30 to 60 MB RAM |
+| **BookStack** | MIT · PHP (Laravel) + MySQL or MariaDB | Book-and-chapter mental model designed for clean human reading and handbooks | Browser WYSIWYG and Markdown editor backed by SQL; no native Git commits, Git blame, or built-in remote MCP server | Non-technical teams want direct browser editing with structured shelves, books, and role-based permissions |
+| **Wiki.js** | AGPL-3.0 · Node.js + PostgreSQL, MySQL, or SQLite | Markdown authoring and optional Git repository sync | Browser-first modular wiki with plugin and theme ecosystem; no agent-only write boundary, optimistic agent locking, or native MCP server | Teams want a full-featured browser wiki with rich auth integrations and granular page permissions |
+| **Docmost** | AGPL-3.0 core · Node.js + PostgreSQL + Redis | Collaborative team documentation with native Mermaid diagram support | Real-time multiplayer browser editor backed by Postgres and Redis; open-core model for enterprise features | Teams want Notion-like live multiplayer editing directly in the browser |
+| **OtterWiki** | MIT · Python (Flask) + Git | Stores plain Markdown files natively in Git with commit history and diffs | Built around human browser editing; no remote MCP authoring tools, optimistic agent locks, or /llms.txt and .md AI endpoints | You want a minimalist, Git-backed wiki edited directly by humans in a browser |
+| **SilverBullet** | MIT · Deno / TypeScript + plain Markdown | Plain Markdown storage with active community MCP bridges | Local-first programmable personal knowledge base using Space Lua and a live browser editor rather than multi-author attributed team commits | One power user wants a hackable personal workspace with custom scripting |
+| **mdBook / MkDocs / Hugo + Git** | MPL-2.0 / BSD / Apache 2.0 · Static site generator | Plain Markdown in Git, full Git blame and diffs, clean static web reading, zero lock-in | Static build pipeline with no live remote MCP server; edits require local Git checkouts or pull requests | Every contributor is an engineer comfortable with Git PRs and you want zero running server |
+
+### Choosing Quickly
+
+- **Choose Ghostbook** when teammates work in different AI apps (Claude, ChatGPT, Gemini, Antigravity, Cursor) and you want zero-maintenance single-binary hosting, real per-author Git commits, live style-guide enforcement, and clean reading without browser editing.
+- **Choose BookStack, Wiki.js, Docmost, or OtterWiki** when humans need to type, format, or co-edit directly inside a browser UI.
+- **Choose SilverBullet** for a single-player programmable Markdown notebook, or **mdBook / MkDocs / Hugo** when an all-engineering team already manages documentation through Git pull requests.
+
 ## Preview
 
 The screenshots below were captured from a live 10-commit Ghostbook session authored entirely through Streamable HTTP MCP calls across three co-authors.
