@@ -36,7 +36,7 @@
             <span class="rev-pill">{{.Book.HeadCommitSHA}}</span>
           </a>
           <span>· {{len .Book.Chapters}} {{if eq (len .Book.Chapters) 1}}chapter{{else}}chapters{{end}}</span>
-          <span>· {{.TotalWords}} words</span>
+          <span>· {{formatNumber .TotalWords}} words</span>
           <span>· {{len .Book.TimelineEntries}} {{if eq (len .Book.TimelineEntries) 1}}milestone{{else}}milestones{{end}}</span>
         </div>
         <div class="provenance-actions">
@@ -76,9 +76,9 @@
           <h2>Open Callouts ({{len .Book.OpenCallouts}})</h2>
           <ul class="editorial-briefing-callouts-list">
             {{range .Book.OpenCallouts}}
-            <li>
-              <span class="callout-kind-pill">{{.Kind}}</span>
-              {{if .AuthorLabel}}<strong>{{.AuthorLabel}}</strong> · {{end}}<a href="/chapters/{{.ChapterSlug}}">{{.ChapterName}}</a>: {{.Excerpt}}
+            <li class="open-callout-item">
+              <span class="callout-kind-pill {{if eq .Kind "TODO"}}kind-todo{{else}}kind-comment{{end}}">{{.Kind}}</span>
+              <span class="open-callout-body">{{if .AuthorLabel}}<strong>{{.AuthorLabel}}</strong> · {{end}}<a href="/chapters/{{.ChapterSlug}}">{{.ChapterName}}</a>: {{.Excerpt}}</span>
             </li>
             {{end}}
           </ul>

@@ -119,7 +119,7 @@
   <div class="print-toolbar">
     <div>
       <a href="/" class="studio-btn">← Back to Interactive Studio</a>
-      <span style="margin-left:12px;font-size:12.5px;color:#222;">US-Letter Grayscale-Laser-Printer Edition · Revision <strong>r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})</strong> · {{len .Book.Chapters}} {{if eq (len .Book.Chapters) 1}}Chapter{{else}}Chapters{{end}} · {{.TotalWords}} Words</span>
+      <span style="margin-left:12px;font-size:12.5px;color:#222;">US-Letter Grayscale-Laser-Printer Edition · Revision <strong>r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})</strong> · {{len .Book.Chapters}} {{if eq (len .Book.Chapters) 1}}Chapter{{else}}Chapters{{end}} · {{formatNumber .TotalWords}} Words</span>
     </div>
     <div>
       <button class="studio-btn primary" id="btnPrintBook" onclick="window.print()">⎙ Print / Save as US-Letter PDF</button>
@@ -130,7 +130,7 @@
       <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:8px;">{{.Book.DisplayKicker}}</div>
       <h1 style="font-size:32px;margin-bottom:12px;">{{.Book.DisplayTitle}}</h1>
       {{if .Book.Authors}}<p style="font-size:15px;color:#111;">{{if eq (len .Book.Authors) 1}}Author{{else}}Co-Authors{{end}}: {{range $i, $a := .Book.Authors}}{{if $i}} · {{end}}{{$a.DisplayName}}{{if $a.Email}} ({{$a.Email}}){{end}}{{end}}</p>{{end}}
-      <p style="font-size:12.5px;color:#222;">Compiled from Git Revision <strong>r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})</strong> · {{len .Book.Chapters}} {{if eq (len .Book.Chapters) 1}}Chapter{{else}}Chapters{{end}} ({{.TotalWords}} Words) · Formatted for US Letter (8.5in × 11.0in) Monochrome Laser Printing</p>
+      <p style="font-size:12.5px;color:#222;">Compiled from Git Revision <strong>r{{.Book.HeadRevisionNumber}} ({{.Book.HeadCommitSHA}})</strong> · {{len .Book.Chapters}} {{if eq (len .Book.Chapters) 1}}Chapter{{else}}Chapters{{end}} ({{formatNumber .TotalWords}} Words) · Formatted for US Letter (8.5in × 11.0in) Monochrome Laser Printing</p>
     </section>
 
     <section class="print-toc book-prose" id="printToc">
@@ -142,7 +142,7 @@
         {{end}}
         <li class="print-toc-item {{if gt .Depth 0}}depth-{{.Depth}}{{end}}">
           <a href="#print-{{.Slug}}">{{sidebarChapterTitle .Title}}</a>
-          <span class="print-toc-meta">r{{.RevisionNumber}} ({{.LastCommitSHA}}) · {{.WordCount}} words</span>
+          <span class="print-toc-meta">r{{.RevisionNumber}} ({{.LastCommitSHA}}) · {{formatNumber .WordCount}} words</span>
         </li>
         {{end}}
       </ul>

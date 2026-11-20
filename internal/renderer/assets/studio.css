@@ -208,7 +208,8 @@ html, body {
   margin-bottom: 0 !important;
 }
 .ssr-search-slug-select {
-  flex: 0 1 220px;
+  flex: 1 1 180px;
+  max-width: 240px;
   margin-bottom: 0 !important;
 }
 .ssr-search-card {
@@ -253,6 +254,31 @@ html, body {
   justify-content: space-between;
   gap: 8px;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  list-style: none;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 5px;
+  user-select: none;
+}
+.ssr-diff-summary::-webkit-details-marker {
+  display: none;
+}
+.ssr-diff-summary::before {
+  content: "▸";
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  margin-right: -2px;
+}
+.ssr-diff-details[open] > .ssr-diff-summary::before {
+  content: "▾";
+}
+.ssr-diff-summary > :first-child {
+  margin-right: auto;
+}
+.ssr-diff-summary:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
 }
 .kbd-hint {
   font-family: monospace;
@@ -540,6 +566,54 @@ html, body {
   overflow-wrap: break-word;
   word-break: break-word;
 }
+.ledger-table code {
+  white-space: nowrap;
+}
+.activity-tool-cell,
+.activity-target-cell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.activity-author-link,
+.book-prose a.activity-author-link,
+.activity-target-link,
+.book-prose a.activity-target-link {
+  text-decoration: none;
+  color: var(--text-primary);
+}
+.activity-author-link:hover,
+.book-prose a.activity-author-link:hover,
+.activity-target-link:hover,
+.book-prose a.activity-target-link:hover {
+  text-decoration: underline;
+}
+.status-pill {
+  display: inline-block;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.status-pill.status-ok {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-fg);
+}
+.status-pill.status-warn {
+  background: rgba(217, 119, 6, 0.14);
+  color: #b45309;
+}
+[data-theme="dark"] .status-pill.status-warn {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+.status-pill.status-err {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-fg);
+}
 .ledger-file-pill {
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
@@ -614,6 +688,10 @@ html, body {
   gap: 12px;
   flex-wrap: wrap;
 }
+.style-governance-header > div {
+  flex: 1 1 280px;
+  min-width: 0;
+}
 .style-governance-sub {
   margin: 4px 0 0;
   color: var(--text-secondary);
@@ -630,27 +708,41 @@ html, body {
   font-size: 12.5px;
   line-height: 1.45;
 }
-.book-config-table {
-  width: 100%;
-  border-collapse: collapse;
+.book-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 20px;
   margin-top: 12px;
-  font-size: 12px;
-}
-.book-config-table th,
-.book-config-table td {
-  text-align: left;
-  padding: 6px 8px;
   border-top: 1px solid var(--border-subtle);
-  vertical-align: top;
 }
-.book-config-table th {
-  color: var(--text-muted);
+.book-config-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  min-width: 0;
+}
+.book-config-cell-wide {
+  grid-column: 1 / -1;
+}
+.book-config-label {
+  font-size: 11px;
   font-weight: 600;
-  white-space: nowrap;
-  width: 18%;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
-.book-config-table td {
+.book-config-val {
+  font-size: 12.5px;
+  line-height: 1.45;
   color: var(--text-primary);
+  overflow-wrap: break-word;
+}
+@media screen and (max-width: 640px) {
+  .book-config-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* First-Class Top-Level Editorial Briefing & Timeline */
@@ -824,15 +916,30 @@ html, body {
 }
 .editorial-briefing-callouts-list,
 .book-prose ul.editorial-briefing-callouts-list {
-  margin: 10px 0 0;
-  padding-left: 20px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding-left: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
   font-size: 13.5px;
-  line-height: 1.5;
+  line-height: 1.52;
   color: var(--text-secondary);
+}
+.open-callout-item {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 0 !important;
+  padding: 9px 12px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+.open-callout-body {
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 .editorial-briefing-callouts-list a {
   color: var(--text-primary);
@@ -845,11 +952,15 @@ html, body {
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10.5px;
   font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: 1.5px 6px;
+  border-radius: 4px;
   background: var(--accent-badge);
   color: var(--text-primary);
-  margin-right: 4px;
+  flex-shrink: 0;
+}
+.callout-kind-pill.kind-todo {
+  background: var(--accent-primary);
+  color: var(--bg-page);
 }
 
 .permalink-banner {
@@ -892,6 +1003,8 @@ html, body {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  flex: 1 1 280px;
+  min-width: 0;
 }
 .permalink-banner-actions {
   display: flex;
@@ -1211,6 +1324,11 @@ html, body {
   letter-spacing: 0.06em;
   color: var(--text-secondary);
   margin-bottom: 10px;
+}
+.guide-profile-label code {
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 .guide-profile-pills {
   display: flex;

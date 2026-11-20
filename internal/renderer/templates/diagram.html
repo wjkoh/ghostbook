@@ -12,8 +12,9 @@
   <meta name="markdown-url" content="{{.MarkdownPath}}">
   {{.JSONLDDiscovery}}
   <style>
-    html, body { margin: 0; padding: 0; background: #ffffff; }
-    pre.mermaid { margin: 0; padding: 24px; text-align: center; }
+    html, body { margin: 0; padding: 0; background: #ffffff; min-height: 100vh; }
+    body { display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 24px; }
+    pre.mermaid { margin: 0; padding: 0; width: 100%; text-align: center; max-width: 100%; }
     pre.mermaid svg { max-width: 100%; height: auto; }
   </style>
 </head>

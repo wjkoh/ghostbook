@@ -74,6 +74,18 @@ Build or install Ghostbook with Go 1.26.2 or newer, or download a precompiled bi
 go install github.com/wjkoh/ghostbook/cmd/ghostbook@latest
 ```
 
+### Try Interactive Demo Mode (Zero Setup)
+
+Launch a local prepopulated demo book (`Atlas Systems Handbook`) with 12 multi-author commits, Mermaid diagrams, KaTeX math, section-level Git blame, open editorial callouts, a renamed chapter, a retired draft permalink, and ready-to-use local MCP credentials:
+
+```bash
+ghostbook demo
+```
+
+By default, `ghostbook demo` runs on `http://127.0.0.1:8090` in an ephemeral temporary directory cleaned up on exit. Pass `--data-dir ./demo-data` to keep local edits across restarts, or `--reset` to re-seed fresh demo data.
+
+### Start Your Own Book
+
 Register your first co-author. Ghostbook creates a local SQLite database and prints your personalized Setup Guide and remote MCP URLs:
 
 ```bash

@@ -361,3 +361,91 @@ func TestRun_StartServeRemoteSyncAndGracefulShutdown(t *testing.T) {
 		t.Fatalf("timed out waiting for main() SIGTERM shutdown")
 	}
 }
+
+func TestRun_DemoSubcommand(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// --help on demo subcommand returns nil cleanly
+	var helpBuf bytes.Buffer
+	if err := run(ctx, []string{"demo", "--help"}, &helpBuf); err != nil || !strings.Contains(helpBuf.String(), "ghostbook demo") {
+		t.Fatalf("expected demo --help output, got err=%v out=%q", err, helpBuf.String())
+	}
+
+	probeLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen ephemeral: %v", err)
+	}
+	demoAddr := probeLn.Addr().String()
+	_ = probeLn.Close()
+
+	var outBuf bytes.Buffer
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, []string{"demo", "-addr", demoAddr}, &outBuf)
+	}()
+
+	deadline := time.Now().Add(8 * time.Second)
+	var ready bool
+	for time.Now().Before(deadline) {
+		resp, reqErr := http.Get("http://" + demoAddr + "/healthz")
+		if reqErr == nil {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && strings.Contains(string(body), `"status":"ok"`) {
+				ready = true
+				break
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if !ready {
+		cancel()
+		t.Fatalf("demo server did not become healthy on %s (err=%v out=%s)", demoAddr, <-errCh, outBuf.String())
+	}
+
+	// Verify key demo routes respond 200 OK
+	for _, path := range []string{
+		"/",
+		"/chapters/01-system-architecture",
+		"/chapters/01-system-architecture/history",
+		"/chapters/03-editorial-lineage",
+		"/chapters/draft-quorum-tuning",
+		"/STYLE_GUIDE",
+		"/book.json",
+		"/changelog",
+		"/activity",
+		"/search?q=BM25",
+		"/guide",
+		"/print",
+		"/api-docs",
+		"/llms.txt",
+	} {
+		resp, reqErr := http.Get("http://" + demoAddr + path)
+		if reqErr != nil {
+			cancel()
+			t.Fatalf("GET %s failed: %v", path, reqErr)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			cancel()
+			t.Fatalf("GET %s returned status %d, want 200", path, resp.StatusCode)
+		}
+	}
+
+	cancel()
+	select {
+	case runErr := <-errCh:
+		if runErr != nil {
+			t.Fatalf("demo server shutdown error: %v", runErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for demo server shutdown")
+	}
+
+	banner := outBuf.String()
+	if !strings.Contains(banner, "Ghostbook Interactive Demo") || !strings.Contains(banner, "/u/alice@example.com:") {
+		t.Fatalf("expected demo startup banner with alice MCP URL, got:\n%s", banner)
+	}
+}

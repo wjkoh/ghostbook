@@ -832,6 +832,64 @@ var templateFuncs = template.FuncMap{
 	"sidebarChapterTitle":   FormatSidebarChapterTitle,
 	"formatUnifiedDiffHTML": FormatUnifiedDiffHTML,
 	"formatSearchSnippet":   FormatSearchSnippetHTML,
+	"formatNumber": func(n int32) string {
+		neg := n < 0
+		v := int64(n)
+		if neg {
+			v = -v
+		}
+		s := fmt.Sprintf("%d", v)
+		if len(s) <= 3 {
+			if neg {
+				return "-" + s
+			}
+			return s
+		}
+		var b strings.Builder
+		if neg {
+			b.WriteByte('-')
+		}
+		rem := len(s) % 3
+		if rem > 0 {
+			b.WriteString(s[:rem])
+			if len(s) > rem {
+				b.WriteByte(',')
+			}
+		}
+		for i := rem; i < len(s); i += 3 {
+			if i > rem {
+				b.WriteByte(',')
+			}
+			b.WriteString(s[i : i+3])
+		}
+		return b.String()
+	},
+	"statusBadgeClass": func(status string) string {
+		switch strings.ToLower(strings.TrimSpace(status)) {
+		case "ok":
+			return "status-ok"
+		case "conflict", "invalid_arg", "not_found":
+			return "status-warn"
+		default:
+			return "status-err"
+		}
+	},
+	"activityTargetHref": func(slug string) string {
+		s := strings.TrimSpace(slug)
+		if s == "" || strings.Contains(s, "..") || strings.ContainsAny(s, `/\?#: `) {
+			return ""
+		}
+		switch s {
+		case "BOOK_CONFIG":
+			return "/book.json"
+		case "STYLE_GUIDE":
+			return "/STYLE_GUIDE"
+		case "SUMMARY":
+			return "/SUMMARY.md"
+		default:
+			return "/chapters/" + s
+		}
+	},
 }
 
 var (

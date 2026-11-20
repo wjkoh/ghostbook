@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-git/go-git/v5"
@@ -110,6 +111,7 @@ type EngineConfig struct {
 	HidePoweredBy     bool
 	ExtraLLMsMarkdown string
 	BannedWords       []string
+	InitialCommitTime time.Time
 }
 
 type BookEngine struct {
@@ -126,6 +128,7 @@ type BookEngine struct {
 	briefMu          sync.Mutex
 	snapshot         atomic.Pointer[renderer.RenderedBook]
 	commitFilesCache map[plumbing.Hash][]string
+	commitClock      func() time.Time
 	syncCh           chan struct{}
 	briefCh          chan struct{}
 }
@@ -174,7 +177,7 @@ func NewBookEngineWithConfig(repoDir string, st *store.Store, baseURL string, cf
 	if len(remoteURLOpt) > 0 {
 		explicitRemote = strings.TrimSpace(remoteURLOpt[0])
 	}
-	repo, err := initOrOpenGitRepo(repoDir, explicitRemote)
+	repo, err := initOrOpenGitRepo(repoDir, explicitRemote, cfg.InitialCommitTime)
 	if err != nil {
 		return nil, err
 	}

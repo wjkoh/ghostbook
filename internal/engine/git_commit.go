@@ -33,7 +33,7 @@ const defaultStyleGuideMarkdown = `# Editorial Style Guide
 2. **Active Voice and Unpacked Clauses:** Use direct subjects and active verbs over passive constructions. Unpack parenthetical asides into clean clauses or dedicated sentences.
 3. **Omit Needless Words:** Eliminate throat-clearing introductions, redundant adverbs, and empty qualifiers.
 4. **Zero Inline Backtick Clutter in Prose and Tables:** Avoid wrapping plain numbers, percentages, dollar amounts, dates, or proper nouns in inline backticks.
-5. **Punctuation, Math, and Typographic Discipline:** Avoid em dashes in narrative prose; use commas, colons, semicolons, or separate sentences instead. Use native Unicode symbols and format equations with \(...\) and $$...$$.
+5. **Punctuation, Math, and Typographic Discipline:** Avoid em dashes in narrative prose; use commas, colons, semicolons, or separate sentences instead. Use native Unicode symbols and format equations with ` + "`\\(...\\)`" + ` and ` + "`$$...$$`" + `.
 6. **Surgical Authoring and Inline Editorial Callouts:** Always call read_chapter before calling patch_chapter. Record review questions or open action items directly in chapter Markdown using blockquote callouts.
 
 ## 2. Staged Draft-and-Swap Protocol
@@ -138,7 +138,7 @@ All 13 authoring and audit operations are mirrored 1-for-1 across Streamable HTT
 `,
 }
 
-func initOrOpenGitRepo(repoDir, explicitRemoteURL string) (*git.Repository, error) {
+func initOrOpenGitRepo(repoDir, explicitRemoteURL string, initialCommitTimeOpt ...time.Time) (*git.Repository, error) {
 	if repo, err := git.PlainOpen(repoDir); err == nil {
 		return repo, nil
 	}
@@ -216,11 +216,15 @@ func initOrOpenGitRepo(repoDir, explicitRemoteURL string) (*git.Repository, erro
 		}
 	}
 
+	seedWhen := time.Now().UTC()
+	if len(initialCommitTimeOpt) > 0 && !initialCommitTimeOpt[0].IsZero() {
+		seedWhen = initialCommitTimeOpt[0].UTC()
+	}
 	_, err = wt.Commit("Initial Ghostbook seed", &git.CommitOptions{
 		Author: &object.Signature{
 			Name:  "Ghostbook",
 			Email: "ghostbook@example.com",
-			When:  time.Now().UTC(),
+			When:  seedWhen,
 		},
 	})
 	if err != nil {
@@ -268,6 +272,9 @@ func (e *BookEngine) removeAndCommitPathsLocked(author *store.Author, commitMsg 
 		}
 	}
 	now := time.Now().UTC()
+	if e.commitClock != nil {
+		now = e.commitClock().UTC()
+	}
 	sig := &object.Signature{
 		Name:  author.DisplayName,
 		Email: author.GitEmail,

@@ -86,6 +86,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 			return nil
 		case "authors":
 			return runAuthorsCommand(ctx, args[1:], out)
+		case "demo":
+			return runDemoCommand(ctx, args[1:], out)
 		}
 	}
 
@@ -494,6 +496,138 @@ func runAuthorsCommand(ctx context.Context, args []string, out io.Writer) error 
 	default:
 		return fmt.Errorf("unknown authors subcommand %q (expected list, add, revoke, or rotate-key)", sub)
 	}
+}
+
+func runDemoCommand(ctx context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("ghostbook demo", flag.ContinueOnError)
+	fs.SetOutput(out)
+	var (
+		addr    = fs.String("addr", firstNonEmpty(os.Getenv("GHOSTBOOK_ADDR"), "127.0.0.1:8090"), "Local HTTP listen address for the interactive demo")
+		baseURL = fs.String("base-url", "", "Optional canonical base URL (defaults to http://<bound-addr>)")
+		dataDir = fs.String("data-dir", "", "Optional persistent directory for demo data (defaults to a temporary directory cleaned up on exit)")
+		reset   = fs.Bool("reset", false, "Reset and re-seed --data-dir before starting the demo server")
+	)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return fmt.Errorf("parse flags: %w", err)
+	}
+
+	effectiveDataDir := strings.TrimSpace(*dataDir)
+	ephemeral := false
+	if effectiveDataDir == "" {
+		tmpDir, err := os.MkdirTemp("", "ghostbook-demo-*")
+		if err != nil {
+			return fmt.Errorf("create temp demo dir: %w", err)
+		}
+		effectiveDataDir = tmpDir
+		ephemeral = true
+		defer func() { _ = os.RemoveAll(tmpDir) }()
+	} else if *reset {
+		for _, artifact := range []string{"repo", "book_studio.db", "book_studio.db-wal", "book_studio.db-shm"} {
+			if err := os.RemoveAll(filepath.Join(effectiveDataDir, artifact)); err != nil {
+				return fmt.Errorf("reset demo artifact %s in %s: %w", artifact, effectiveDataDir, err)
+			}
+		}
+	}
+
+	if err := os.MkdirAll(effectiveDataDir, 0o700); err != nil {
+		return fmt.Errorf("mkdir demo data-dir: %w", err)
+	}
+
+	ln, err := net.Listen("tcp", *addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", *addr, err)
+	}
+	boundAddr := ln.Addr().String()
+	effectiveBaseURL := strings.TrimRight(strings.TrimSpace(*baseURL), "/")
+	if effectiveBaseURL == "" {
+		host, port, splitErr := net.SplitHostPort(boundAddr)
+		if splitErr == nil && (host == "" || host == "0.0.0.0" || host == "::") {
+			effectiveBaseURL = "http://127.0.0.1:" + port
+		} else {
+			effectiveBaseURL = "http://" + boundAddr
+		}
+	}
+
+	dbPath := filepath.Join(effectiveDataDir, "book_studio.db")
+	repoDir := filepath.Join(effectiveDataDir, "repo")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("open demo sqlite store: %w", err)
+	}
+	defer func() { _ = st.Close() }()
+	_ = os.Chmod(dbPath, 0o600)
+
+	eng, err := engine.NewBookEngineWithConfig(repoDir, st, effectiveBaseURL, engine.EngineConfig{
+		BookTitle:         "Atlas Systems Handbook",
+		BookKicker:        "Interactive Demo",
+		MCPName:           "ghostbook-demo",
+		InitialCommitTime: time.Now().UTC().Truncate(time.Second).Add(-120 * time.Hour),
+	})
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("init demo book engine: %w", err)
+	}
+
+	demoRes, err := engine.SeedDemoBook(ctx, eng)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("seed demo book: %w", err)
+	}
+
+	handler := server.NewHTTPHandler(eng, server.HTTPHandlerOptions{})
+	httpSrv := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+
+	runCtx, cancelRun := context.WithCancel(ctx)
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		<-runCtx.Done()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = httpSrv.Shutdown(shutCtx)
+	}()
+
+	storageMode := effectiveDataDir
+	if ephemeral {
+		storageMode = effectiveDataDir + " (ephemeral, cleaned up on exit)"
+	}
+	_, _ = fmt.Fprintf(out, "\nGhostbook Interactive Demo (%s) listening on %s\n", version, boundAddr)
+	_, _ = fmt.Fprintf(out, "Book:    Atlas Systems Handbook (r%d · %s)\n", demoRes.HeadRevision, demoRes.HeadSHA)
+	_, _ = fmt.Fprintf(out, "Data:    %s\n\n", storageMode)
+	_, _ = fmt.Fprintf(out, "Explore in your browser:\n")
+	_, _ = fmt.Fprintf(out, "  Timeline:        %s/\n", effectiveBaseURL)
+	_, _ = fmt.Fprintf(out, "  Chapter 1:       %s/chapters/01-system-architecture\n", effectiveBaseURL)
+	_, _ = fmt.Fprintf(out, "  History & Blame: %s/chapters/01-system-architecture/history\n", effectiveBaseURL)
+	_, _ = fmt.Fprintf(out, "  Style & Config:  %s/STYLE_GUIDE\n", effectiveBaseURL)
+	_, _ = fmt.Fprintf(out, "  Git Commit Log:  %s/changelog\n", effectiveBaseURL)
+	_, _ = fmt.Fprintf(out, "  Agent Activity:  %s/activity\n", effectiveBaseURL)
+	_, _ = fmt.Fprintf(out, "  Print Edition:   %s/print\n", effectiveBaseURL)
+	_, _ = fmt.Fprintf(out, "  API Reference:   %s/api-docs\n", effectiveBaseURL)
+	_, _ = fmt.Fprintf(out, "  Raw AI Index:    %s/llms.txt\n", effectiveBaseURL)
+	if len(demoRes.Authors) > 0 {
+		primary := demoRes.Authors[0]
+		_, _ = fmt.Fprintf(out, "\nTry live AI authoring right away (%s):\n", primary.DisplayName)
+		_, _ = fmt.Fprintf(out, "  Setup Guide:     %s/u/%s/guide\n", effectiveBaseURL, primary.AuthIdentifier())
+		_, _ = fmt.Fprintf(out, "  Local MCP URL:   %s/u/%s/mcp\n", effectiveBaseURL, primary.AuthIdentifier())
+	}
+	_, _ = fmt.Fprintf(out, "\nPress Ctrl+C to stop.\n")
+
+	serveErr := httpSrv.Serve(ln)
+	cancelRun()
+	<-shutdownDone
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		return fmt.Errorf("demo http server error: %w", serveErr)
+	}
+	return nil
 }
 
 func firstNonEmpty(vals ...string) string {

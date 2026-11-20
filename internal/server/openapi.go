@@ -263,7 +263,7 @@ func buildOpenAPISpecDocument(baseURL, bookTitle string) map[string]any {
 					"type":         "http",
 					"scheme":       "bearer",
 					"bearerFormat": "<email>:<secret-key>",
-					"description":  "Pass your secret co-author credential (<email>:<secret-key>) as the Bearer token or via the /u/<email>:<secret-key>/book.v1.BookService/... URL prefix.",
+					"description":  "Pass your secret co-author credential (`<email>:<secret-key>`) as the Bearer token or via the `/u/<email>:<secret-key>/book.v1.BookService/...` URL prefix.",
 				},
 			},
 		},

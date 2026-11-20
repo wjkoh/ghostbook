@@ -83,7 +83,7 @@
         </div>
         {{if .ActiveChapter.DiffToLatest}}
         <details class="ssr-diff-details" id="permalinkDiffDetails" style="margin-top:8px;">
-          <summary class="ssr-diff-summary">Compare Diff with Latest</summary>
+          <summary class="ssr-diff-summary"><span>Compare Diff with Latest</span></summary>
           <div class="diff-box" id="permalinkDiffContent" style="margin-top:8px;">{{formatUnifiedDiffHTML .ActiveChapter.DiffToLatest}}</div>
         </details>
         {{end}}
@@ -102,7 +102,7 @@
           </a>
           <span>· <strong id="chapterLastAuthor">{{.ActiveChapter.LastAuthor}}</strong></span>
           <span>· <span id="chapterLastUpdated" title="{{.ActiveChapter.LastUpdatedISO}}">{{formatTimestamp .ActiveChapter.LastUpdatedISO}}</span></span>
-          <span>· {{.ActiveChapter.WordCount}} words</span>
+          <span>· {{formatNumber .ActiveChapter.WordCount}} words</span>
         </div>
         <div class="provenance-actions">
           <button class="provenance-chip" id="btnCopyPermalink" onclick="copyChapterPermalink()" title="Copy permanent link to revision r{{.ActiveChapter.RevisionNumber}} ({{.ActiveChapter.LastCommitSHA}})">🔗 Copy Permalink</button>
@@ -123,35 +123,37 @@
           <strong>Configuration Warning:</strong> {{.Book.BookConfig.ConfigWarning}}
         </div>
         {{end}}
-        <div class="table-scroll-wrap" id="activeBookConfigCard">
-          <table class="book-config-table">
-            <tbody>
-              <tr>
-                <th>Book Title &amp; Kicker</th>
-                <td>{{.Book.DisplayTitle}} · {{.Book.DisplayKicker}}</td>
-                <th>Config Source</th>
-                <td>{{if .Book.BookConfig.FromRepoFile}}Repository (<code>src/book.json</code>){{else}}Server defaults (CLI / env){{end}}</td>
-              </tr>
-              <tr>
-                <th>Max Heading Length</th>
-                <td>{{if gt .Book.BookConfig.MaxHeadingChars 0}}{{.Book.BookConfig.MaxHeadingChars}} chars{{else}}Disabled{{end}}</td>
-                <th>Em-Dash Check</th>
-                <td>{{if .Book.BookConfig.ForbidEmDash}}Enabled{{else}}Disabled{{end}}</td>
-              </tr>
-              <tr>
-                <th>Banned Words</th>
-                <td>{{if .Book.BookConfig.BannedWords}}{{range $i, $w := .Book.BookConfig.BannedWords}}{{if $i}}, {{end}}<code>{{$w}}</code>{{end}}{{else}}None{{end}}</td>
-                <th>Sidebar Credit</th>
-                <td>{{if .Book.BookConfig.HidePoweredBy}}Hidden{{else}}Visible{{end}}</td>
-              </tr>
-              {{if .Book.BookConfig.TimelineGuidance}}
-              <tr>
-                <th>Timeline Guidance</th>
-                <td colspan="3">{{.Book.BookConfig.TimelineGuidance}}</td>
-              </tr>
-              {{end}}
-            </tbody>
-          </table>
+        <div class="book-config-grid" id="activeBookConfigCard">
+          <div class="book-config-cell">
+            <span class="book-config-label">Book Title &amp; Kicker</span>
+            <span class="book-config-val">{{.Book.DisplayTitle}} · {{.Book.DisplayKicker}}</span>
+          </div>
+          <div class="book-config-cell">
+            <span class="book-config-label">Config Source</span>
+            <span class="book-config-val">{{if .Book.BookConfig.FromRepoFile}}Repository (<code>src/book.json</code>){{else}}Server defaults (CLI / env){{end}}</span>
+          </div>
+          <div class="book-config-cell">
+            <span class="book-config-label">Max Heading Length</span>
+            <span class="book-config-val">{{if gt .Book.BookConfig.MaxHeadingChars 0}}{{.Book.BookConfig.MaxHeadingChars}} chars{{else}}Disabled{{end}}</span>
+          </div>
+          <div class="book-config-cell">
+            <span class="book-config-label">Em-Dash Check</span>
+            <span class="book-config-val">{{if .Book.BookConfig.ForbidEmDash}}Enabled{{else}}Disabled{{end}}</span>
+          </div>
+          <div class="book-config-cell">
+            <span class="book-config-label">Banned Words</span>
+            <span class="book-config-val">{{if .Book.BookConfig.BannedWords}}{{range $i, $w := .Book.BookConfig.BannedWords}}{{if $i}}, {{end}}<code>{{$w}}</code>{{end}}{{else}}None{{end}}</span>
+          </div>
+          <div class="book-config-cell">
+            <span class="book-config-label">Sidebar Credit</span>
+            <span class="book-config-val">{{if .Book.BookConfig.HidePoweredBy}}Hidden{{else}}Visible{{end}}</span>
+          </div>
+          {{if .Book.BookConfig.TimelineGuidance}}
+          <div class="book-config-cell book-config-cell-wide">
+            <span class="book-config-label">Timeline Guidance</span>
+            <span class="book-config-val">{{.Book.BookConfig.TimelineGuidance}}</span>
+          </div>
+          {{end}}
         </div>
       </section>
       {{end}}
@@ -160,6 +162,7 @@
         {{.ActiveChapter.RenderedHTML}}
       </article>
 
+      {{if or .ActiveChapter.PrevSlug .ActiveChapter.NextSlug}}
       <nav class="chapter-pager">
         {{if .ActiveChapter.PrevSlug}}
         <a href="/chapters/{{.ActiveChapter.PrevSlug}}" class="pager-link">
@@ -175,6 +178,7 @@
         </a>
         {{end}}
       </nav>
+      {{end}}
     </main>
   </div>
 </div>

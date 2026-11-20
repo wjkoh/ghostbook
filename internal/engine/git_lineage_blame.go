@@ -509,11 +509,13 @@ func (e *BookEngine) computeChapterBlameLocked(slug string) (*GetChapterBlameOut
 	if err != nil {
 		return nil, fmt.Errorf("%w: blame %s: %v", ErrNotFound, cleanSlug, err)
 	}
+	_, revMap, _ := e.orderedCommitsLocked()
 
 	var sections []BlameSectionItem
 	curHeading := "Chapter Introduction"
 	curStart := 1
 	var latestSHA, latestAuthor string
+	var latestRev int32
 	var latestWhen time.Time
 	inCodeFence := false
 
@@ -533,6 +535,8 @@ func (e *BookEngine) computeChapterBlameLocked(slug string) (*GetChapterBlameOut
 
 	for idx, line := range blameRes.Lines {
 		lineNum := idx + 1
+		lineHash := line.Hash.String()
+		lineRev := revMap[lineHash]
 		trimmed := strings.TrimSpace(line.Text)
 		if isMarkdownCodeFence(trimmed) {
 			inCodeFence = !inCodeFence
@@ -543,14 +547,16 @@ func (e *BookEngine) computeChapterBlameLocked(slug string) (*GetChapterBlameOut
 			}
 			curHeading = cleanHeadingTitle(trimmed)
 			curStart = lineNum
-			latestSHA = line.Hash.String()
+			latestSHA = lineHash
 			latestAuthor = extractBlameAuthor(line)
+			latestRev = lineRev
 			latestWhen = line.Date
 			continue
 		}
-		if latestSHA == "" || line.Date.After(latestWhen) {
-			latestSHA = line.Hash.String()
+		if latestSHA == "" || lineRev > latestRev || (lineRev == latestRev && line.Date.After(latestWhen)) {
+			latestSHA = lineHash
 			latestAuthor = extractBlameAuthor(line)
+			latestRev = lineRev
 			latestWhen = line.Date
 		}
 	}

@@ -36,6 +36,14 @@
         {{if .Entries}}
         <div class="table-scroll-wrap">
         <table id="ssrActivityTable" class="ledger-table">
+          <colgroup>
+            <col style="width:18%;">
+            <col style="width:11%;">
+            <col style="width:27%;">
+            <col style="width:24%;">
+            <col style="width:10%;">
+            <col style="width:10%;">
+          </colgroup>
           <thead>
             <tr>
               <th>Timestamp (UTC)</th>
@@ -50,10 +58,10 @@
             {{range .Entries}}
             <tr>
               <td style="white-space:nowrap;" title="{{.TimestampISO}}">{{formatTimestamp .TimestampISO}}</td>
-              <td><strong>{{.AuthorID}}</strong></td>
-              <td><span class="rev-pill">{{.Protocol}}</span> <code>{{.ToolName}}</code></td>
-              <td>{{if .ChapterSlug}}{{.ChapterSlug}}{{else}}—{{end}}{{if .GitCommitSHA}} <span class="rev-pill">{{.GitCommitSHA}}</span>{{end}}</td>
-              <td>{{.Status}}</td>
+              <td><a href="/activity?author={{.AuthorID}}" class="activity-author-link" title="Filter audit log by {{.AuthorID}}"><strong>{{.AuthorID}}</strong></a></td>
+              <td><div class="activity-tool-cell"><span class="rev-pill">{{.Protocol}}</span> <code>{{.ToolName}}</code></div></td>
+              <td><div class="activity-target-cell">{{if .ChapterSlug}}{{$href := activityTargetHref .ChapterSlug}}{{if $href}}<a href="{{$href}}" class="activity-target-link">{{.ChapterSlug}}</a>{{else}}{{.ChapterSlug}}{{end}}{{else}}—{{end}}{{if .GitCommitSHA}} <a href="/rev/{{.GitCommitSHA}}" class="rev-pill" style="text-decoration:none;">{{.GitCommitSHA}}</a>{{end}}</div></td>
+              <td><span class="status-pill {{statusBadgeClass .Status}}"{{if .ErrorMessage}} title="{{.ErrorMessage}}"{{end}}>{{.Status}}</span></td>
               <td style="white-space:nowrap;">{{.DurationMs}} ms</td>
             </tr>
             {{end}}
