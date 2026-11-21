@@ -76,7 +76,19 @@ go install github.com/wjkoh/ghostbook/cmd/ghostbook@latest
 
 ### Try Interactive Demo Mode (Zero Setup)
 
-Launch a local prepopulated demo book (`Atlas Systems Handbook`) with 12 multi-author commits, Mermaid diagrams, KaTeX math, section-level Git blame, open editorial callouts, a renamed chapter, a retired draft permalink, and ready-to-use local MCP credentials:
+Launch a local prepopulated demo book (`Atlas Systems Handbook`) with 12 multi-author commits, Mermaid diagrams, KaTeX math, section-level Git blame, open editorial callouts, a renamed chapter, a retired draft permalink, and ready-to-use local MCP credentials.
+
+Without cloning or installing anything (Go or Nix):
+
+```bash
+go run github.com/wjkoh/ghostbook/cmd/ghostbook@latest demo
+```
+
+```bash
+nix run github:wjkoh/ghostbook -- demo
+```
+
+Or if Ghostbook is already installed:
 
 ```bash
 ghostbook demo
