@@ -26,6 +26,11 @@
           buf
           git
         ];
+        shellHook = ''
+          if [ -d .git ] && [ -d .githooks ]; then
+            git config core.hooksPath .githooks
+          fi
+        '';
       };
     });
 

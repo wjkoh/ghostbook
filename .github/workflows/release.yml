@@ -22,6 +22,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Verify flake.nix version matches tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          expected="${TAG#v}"
+          actual="$(sed -nE 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([^"]+)";/\1/p' flake.nix | head -n 1)"
+          if [ "$actual" != "$expected" ]; then
+            echo "ERROR: flake.nix version ($actual) does not match release tag $TAG (expected $expected)" >&2
+            exit 1
+          fi
+          echo "flake.nix version matches $TAG ($actual)"
+
       - name: Vet and test
         run: |
           go vet ./...
