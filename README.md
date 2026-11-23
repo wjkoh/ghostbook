@@ -74,6 +74,12 @@ Build or install Ghostbook with Go 1.26.2 or newer, or download a precompiled bi
 go install github.com/wjkoh/ghostbook/cmd/ghostbook@latest
 ```
 
+Or install with Homebrew:
+
+```bash
+brew install wjkoh/tap/ghostbook
+```
+
 ### Try Interactive Demo Mode (Zero Setup)
 
 Launch a local prepopulated demo book (`Atlas Systems Handbook`) with 12 multi-author commits, Mermaid diagrams, KaTeX math, section-level Git blame, open editorial callouts, a renamed chapter, a retired draft permalink, and ready-to-use local MCP credentials.
